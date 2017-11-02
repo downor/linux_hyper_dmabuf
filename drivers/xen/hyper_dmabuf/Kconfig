@@ -1,0 +1,14 @@
+menu "hyper_dmabuf options"
+
+config HYPER_DMABUF
+	tristate "Enables hyper dmabuf driver"
+	default y
+
+config HYPER_DMABUF_XEN
+	bool "Configure hyper_dmabuf for XEN hypervisor"
+	default y
+	depends on HYPER_DMABUF
+	help
+	  Configuring hyper_dmabuf driver for XEN hypervisor
+
+endmenu
