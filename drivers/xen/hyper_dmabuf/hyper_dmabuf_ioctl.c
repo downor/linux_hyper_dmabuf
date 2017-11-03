@@ -12,6 +12,7 @@
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_query.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
+#include "xen/hyper_dmabuf_xen_comm_list.h"
 #include "hyper_dmabuf_msg.h"
 
 struct hyper_dmabuf_private {
@@ -31,6 +32,7 @@ static uint32_t hyper_dmabuf_id_gen(void) {
 static int hyper_dmabuf_exporter_ring_setup(void *data)
 {
 	struct ioctl_hyper_dmabuf_exporter_ring_setup *ring_attr;
+	struct hyper_dmabuf_ring_info_export *ring_info;
 	int ret = 0;
 
 	if (!data) {
@@ -38,6 +40,15 @@ static int hyper_dmabuf_exporter_ring_setup(void *data)
 		return -1;
 	}
 	ring_attr = (struct ioctl_hyper_dmabuf_exporter_ring_setup *)data;
+
+	/* check if the ring ch already exists */
+	ring_info = hyper_dmabuf_find_exporter_ring(ring_attr->remote_domain);
+
+	if (ring_info) {
+		printk("(exporter's) ring ch to domid = %d already exist\ngref = %d, port = %d\n",
+			ring_info->rdomain, ring_info->gref_ring, ring_info->port);
+		return 0;
+	}
 
 	ret = hyper_dmabuf_exporter_ringbuf_init(ring_attr->remote_domain,
 						&ring_attr->ring_refid,
@@ -49,6 +60,7 @@ static int hyper_dmabuf_exporter_ring_setup(void *data)
 static int hyper_dmabuf_importer_ring_setup(void *data)
 {
 	struct ioctl_hyper_dmabuf_importer_ring_setup *setup_imp_ring_attr;
+	struct hyper_dmabuf_ring_info_import *ring_info;
 	int ret = 0;
 
 	if (!data) {
@@ -57,6 +69,14 @@ static int hyper_dmabuf_importer_ring_setup(void *data)
 	}
 
 	setup_imp_ring_attr = (struct ioctl_hyper_dmabuf_importer_ring_setup *)data;
+
+	/* check if the ring ch already exist */
+	ring_info = hyper_dmabuf_find_importer_ring(setup_imp_ring_attr->source_domain);
+
+	if (ring_info) {
+		printk("(importer's) ring ch to domid = %d already exist\n", ring_info->sdomain);
+		return 0;
+	}
 
 	/* user need to provide a port number and ref # for the page used as ring buffer */
 	ret = hyper_dmabuf_importer_ringbuf_init(setup_imp_ring_attr->source_domain,

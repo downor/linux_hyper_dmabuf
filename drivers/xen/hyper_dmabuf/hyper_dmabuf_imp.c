@@ -827,12 +827,11 @@ static const struct dma_buf_ops hyper_dmabuf_ops = {
 int hyper_dmabuf_export_fd(struct hyper_dmabuf_imported_sgt_info *dinfo, int flags)
 {
 	int fd;
-
 	struct dma_buf* dmabuf;
 
-/* call hyper_dmabuf_export_dmabuf and create and bind a handle for it
- * then release */
-
+	/* call hyper_dmabuf_export_dmabuf and create
+	 * and bind a handle for it then release
+	 */
 	dmabuf = hyper_dmabuf_export_dma_buf(dinfo);
 
 	fd = dma_buf_fd(dmabuf, flags);
@@ -845,9 +844,11 @@ struct dma_buf* hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_inf
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
 	exp_info.ops = &hyper_dmabuf_ops;
-	exp_info.size = dinfo->sgt->nents * PAGE_SIZE; /* multiple of PAGE_SIZE, not considering offset */
+
+	/* multiple of PAGE_SIZE, not considering offset */
+	exp_info.size = dinfo->sgt->nents * PAGE_SIZE;
 	exp_info.flags = /* not sure about flag */0;
 	exp_info.priv = dinfo;
 
 	return dma_buf_export(&exp_info);
-};
+}
