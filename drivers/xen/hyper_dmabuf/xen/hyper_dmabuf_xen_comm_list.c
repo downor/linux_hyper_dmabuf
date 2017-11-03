@@ -104,3 +104,25 @@ int hyper_dmabuf_remove_importer_ring(int domid)
 
 	return -1;
 }
+
+void hyper_dmabuf_foreach_exporter_ring(void (*func)(int rdom))
+{
+	struct hyper_dmabuf_exporter_ring_info *info_entry;
+	struct hlist_node *tmp;
+	int bkt;
+
+	hash_for_each_safe(hyper_dmabuf_hash_exporter_ring, bkt, tmp, info_entry, node) {
+		func(info_entry->info->rdomain);
+	}
+}
+
+void hyper_dmabuf_foreach_importer_ring(void (*func)(int sdom))
+{
+	struct hyper_dmabuf_importer_ring_info *info_entry;
+	struct hlist_node *tmp;
+	int bkt;
+
+	hash_for_each_safe(hyper_dmabuf_hash_importer_ring, bkt, tmp, info_entry, node) {
+		func(info_entry->info->sdomain);
+	}
+}

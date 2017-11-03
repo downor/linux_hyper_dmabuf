@@ -32,4 +32,10 @@ int hyper_dmabuf_remove_exporter_ring(int domid);
 
 int hyper_dmabuf_remove_importer_ring(int domid);
 
+/* iterates over all exporter rings and calls provided function for each of them */
+void hyper_dmabuf_foreach_exporter_ring(void (*func)(int rdom));
+
+/* iterates over all importer rings and calls provided function for each of them */
+void hyper_dmabuf_foreach_importer_ring(void (*func)(int sdom));
+
 #endif // __HYPER_DMABUF_XEN_COMM_LIST_H__

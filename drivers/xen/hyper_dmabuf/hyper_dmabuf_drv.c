@@ -6,6 +6,7 @@
 #include "hyper_dmabuf_conf.h"
 #include "hyper_dmabuf_list.h"
 #include "xen/hyper_dmabuf_xen_comm_list.h"
+#include "xen/hyper_dmabuf_xen_comm.h"
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("IOTG-PED, INTEL");
@@ -43,6 +44,11 @@ static int hyper_dmabuf_drv_init(void)
 		return -EINVAL;
 	}
 
+	ret = hyper_dmabuf_setup_data_dir();
+	if (ret < 0) {
+		return -EINVAL;
+	}
+
 	/* interrupt for comm should be registered here: */
 	return ret;
 }
@@ -52,12 +58,15 @@ static void hyper_dmabuf_drv_exit(void)
 {
 	/* hash tables for export/import entries and ring_infos */
 	hyper_dmabuf_table_destroy();
-	hyper_dmabuf_ring_table_init();
+
+	hyper_dmabuf_cleanup_ringbufs();
+	hyper_dmabuf_ring_table_destroy();
 
 	/* destroy workqueue */
 	if (hyper_dmabuf_private.work_queue)
 		destroy_workqueue(hyper_dmabuf_private.work_queue);
 
+	hyper_dmabuf_destroy_data_dir();
 	printk( KERN_NOTICE "dma_buf-src_sink model: Exiting" );
 	unregister_device();
 }

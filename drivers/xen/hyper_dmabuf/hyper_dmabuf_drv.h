@@ -29,8 +29,6 @@ struct ioctl_hyper_dmabuf_exporter_ring_setup {
 	/* IN parameters */
 	/* Remote domain id */
 	uint32_t remote_domain;
-	grant_ref_t ring_refid; /* assigned by driver, copied to userspace after initialization */
-	uint32_t port; /* assigned by driver, copied to userspace after initialization */
 };
 
 #define IOCTL_HYPER_DMABUF_IMPORTER_RING_SETUP \
@@ -39,10 +37,6 @@ struct ioctl_hyper_dmabuf_importer_ring_setup {
 	/* IN parameters */
 	/* Source domain id */
 	uint32_t source_domain;
-	/* Ring shared page refid */
-	grant_ref_t ring_refid;
-	/* Port number */
-	uint32_t port;
 };
 
 #define IOCTL_HYPER_DMABUF_EXPORT_REMOTE \
@@ -92,14 +86,6 @@ struct ioctl_hyper_dmabuf_query {
 	uint32_t item;
 	/* OUT parameters */
 	/* Value of queried item */
-	uint32_t info;
-};
-
-#define IOCTL_HYPER_DMABUF_REMOTE_EXPORTER_RING_SETUP \
-_IOC(_IOC_NONE, 'G', 6, sizeof(struct ioctl_hyper_dmabuf_remote_exporter_ring_setup))
-struct ioctl_hyper_dmabuf_remote_exporter_ring_setup {
-	/* in parameters */
-	uint32_t rdomain; /* id of remote domain where exporter's ring need to be setup */
 	uint32_t info;
 };
 
