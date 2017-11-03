@@ -203,7 +203,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 
 	if (!data) {
 		printk("user data is NULL\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	export_fd_attr = (struct ioctl_hyper_dmabuf_export_fd *)data;
@@ -218,15 +218,17 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 		imported_sgt_info->last_len, imported_sgt_info->nents,
 		HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(imported_sgt_info->hyper_dmabuf_id));
 
-	imported_sgt_info->sgt = hyper_dmabuf_map_pages(imported_sgt_info->gref,
-						imported_sgt_info->frst_ofst,
-						imported_sgt_info->last_len,
-						imported_sgt_info->nents,
-						HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(imported_sgt_info->hyper_dmabuf_id),
-						&imported_sgt_info->shared_pages_info);
-
 	if (!imported_sgt_info->sgt) {
-		return -1;
+		imported_sgt_info->sgt = hyper_dmabuf_map_pages(imported_sgt_info->gref,
+							imported_sgt_info->frst_ofst,
+							imported_sgt_info->last_len,
+							imported_sgt_info->nents,
+							HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(imported_sgt_info->hyper_dmabuf_id),
+							&imported_sgt_info->shared_pages_info);
+		if (!imported_sgt_info->sgt) {
+			printk("Failed to create sgt\n");
+			return -EINVAL;
+		}
 	}
 
 	export_fd_attr->fd = hyper_dmabuf_export_fd(imported_sgt_info, export_fd_attr->flags);
