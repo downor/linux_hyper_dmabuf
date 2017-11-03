@@ -7,8 +7,6 @@ enum hyper_dmabuf_command {
 	HYPER_DMABUF_DESTROY_FINISH,
 	HYPER_DMABUF_OPS_TO_REMOTE,
 	HYPER_DMABUF_OPS_TO_SOURCE,
-	HYPER_DMABUF_EXPORTER_RING_SETUP, /* requesting remote domain to set up exporter's ring */
-	HYPER_DMABUF_IMPORTER_RING_SETUP, /* requesting remote domain to set up importer's ring */
 };
 
 enum hyper_dmabuf_ops {

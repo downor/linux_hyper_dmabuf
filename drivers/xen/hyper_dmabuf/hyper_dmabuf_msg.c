@@ -70,12 +70,6 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 			request->operands[i] = operands[i];
 		break;
 
-	/* requesting the other side to setup another ring channel for reverse direction */
-	case HYPER_DMABUF_EXPORTER_RING_SETUP:
-		/* command : HYPER_DMABUF_EXPORTER_RING_SETUP */
-		/* no operands needed */
-		break;
-
 	default:
 		/* no command found */
 		return;
@@ -163,13 +157,6 @@ void cmd_process_work(struct work_struct *work)
 		 */
 		break;
 
-	case HYPER_DMABUF_IMPORTER_RING_SETUP:
-		/* command: HYPER_DMABUF_IMPORTER_RING_SETUP */
-		/* no operands needed */
-		hyper_dmabuf_importer_ringbuf_init(domid, req->operands[0], req->operands[1]);
-
-		break;
-
 	default:
 		/* shouldn't get here */
 		/* no matched command, nothing to do.. just return error */
@@ -185,7 +172,6 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 	struct cmd_process *proc;
 	struct hyper_dmabuf_ring_rq *temp_req;
 	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
-	int ret;
 
 	if (!req) {
 		printk("request is NULL\n");
@@ -193,27 +179,12 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 	}
 
 	if ((req->command < HYPER_DMABUF_EXPORT) ||
-		(req->command > HYPER_DMABUF_IMPORTER_RING_SETUP)) {
+		(req->command > HYPER_DMABUF_OPS_TO_SOURCE)) {
 		printk("invalid command\n");
 		return -EINVAL;
 	}
 
 	req->status = HYPER_DMABUF_REQ_PROCESSED;
-
-	/* HYPER_DMABUF_EXPORTER_RING_SETUP requires immediate
-	 * follow up so can't be processed in workqueue
-	 */
-	if (req->command == HYPER_DMABUF_EXPORTER_RING_SETUP) {
-		ret = hyper_dmabuf_exporter_ringbuf_init(domid, &req->operands[0], &req->operands[1]);
-		if (ret < 0) {
-			req->status = HYPER_DMABUF_REQ_ERROR;
-		}
-
-		req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
-		req->command = HYPER_DMABUF_IMPORTER_RING_SETUP;
-
-		return req->command;
-	}
 
 	/* HYPER_DMABUF_DESTROY requires immediate
 	 * follow up so can't be processed in workqueue

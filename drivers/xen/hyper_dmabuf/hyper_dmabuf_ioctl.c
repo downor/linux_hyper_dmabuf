@@ -48,9 +48,7 @@ static int hyper_dmabuf_exporter_ring_setup(void *data)
 		return 0;
 	}
 
-	ret = hyper_dmabuf_exporter_ringbuf_init(ring_attr->remote_domain,
-						&ring_attr->ring_refid,
-						&ring_attr->port);
+	ret = hyper_dmabuf_exporter_ringbuf_init(ring_attr->remote_domain);
 
 	return ret;
 }
@@ -76,10 +74,7 @@ static int hyper_dmabuf_importer_ring_setup(void *data)
 		return 0;
 	}
 
-	/* user need to provide a port number and ref # for the page used as ring buffer */
-	ret = hyper_dmabuf_importer_ringbuf_init(setup_imp_ring_attr->source_domain,
-						 setup_imp_ring_attr->ring_refid,
-						 setup_imp_ring_attr->port);
+	ret = hyper_dmabuf_importer_ringbuf_init(setup_imp_ring_attr->source_domain);
 
 	return ret;
 }
@@ -355,26 +350,6 @@ static int hyper_dmabuf_query(void *data)
 	return ret;
 }
 
-static int hyper_dmabuf_remote_exporter_ring_setup(void *data)
-{
-	struct ioctl_hyper_dmabuf_remote_exporter_ring_setup *remote_exporter_ring_setup;
-	struct hyper_dmabuf_ring_rq *req;
-
-	remote_exporter_ring_setup = (struct ioctl_hyper_dmabuf_remote_exporter_ring_setup *)data;
-
-	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORTER_RING_SETUP, NULL);
-
-	/* requesting remote domain to set-up exporter's ring */
-	if(hyper_dmabuf_send_request(remote_exporter_ring_setup->rdomain, req) < 0) {
-		kfree(req);
-		return -EINVAL;
-	}
-
-	kfree(req);
-	return 0;
-}
-
 static const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORTER_RING_SETUP, hyper_dmabuf_exporter_ring_setup, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_IMPORTER_RING_SETUP, hyper_dmabuf_importer_ring_setup, 0),
@@ -382,7 +357,6 @@ static const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_FD, hyper_dmabuf_export_fd_ioctl, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_DESTROY, hyper_dmabuf_destroy, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY, hyper_dmabuf_query, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_REMOTE_EXPORTER_RING_SETUP, hyper_dmabuf_remote_exporter_ring_setup, 0),
 };
 
 static long hyper_dmabuf_ioctl(struct file *filp,
