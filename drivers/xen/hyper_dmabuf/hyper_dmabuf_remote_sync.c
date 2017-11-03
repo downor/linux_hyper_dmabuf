@@ -11,6 +11,21 @@
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
+/* Whenever importer does dma operations from remote domain,
+ * a notification is sent to the exporter so that exporter
+ * issues equivalent dma operation on the original dma buf
+ * for indirect synchronization via shadow operations.
+ *
+ * All ptrs and references (e.g struct sg_table*,
+ * struct dma_buf_attachment) created via these operations on
+ * exporter's side are kept in stack (implemented as circular
+ * linked-lists) separately so that those can be re-referenced
+ * later when unmapping operations are invoked to free those.
+ *
+ * The very first element on the bottom of each stack holds
+ * are what is created when initial exporting is issued so it
+ * should not be modified or released by this fuction.
+ */
 int hyper_dmabuf_remote_sync(int id, int ops)
 {
 	struct hyper_dmabuf_sgt_info *sgt_info;
@@ -33,7 +48,7 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		attachl = kcalloc(1, sizeof(*attachl), GFP_KERNEL);
 
 		attachl->attach = dma_buf_attach(sgt_info->dma_buf,
-						hyper_dmabuf_private.device);
+						 hyper_dmabuf_private.device);
 
 		if (!attachl->attach) {
 			kfree(attachl);
@@ -45,22 +60,31 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		break;
 
 	case HYPER_DMABUF_OPS_DETACH:
-		attachl = list_first_entry(&sgt_info->active_attached->list,
-					struct attachment_list, list);
-
-		if (!attachl) {
+		if (list_empty(&sgt_info->active_attached->list)) {
 			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_DETACH\n");
+			printk("no more dmabuf attachment left to be detached\n");
 			return -EINVAL;
 		}
+
+		attachl = list_first_entry(&sgt_info->active_attached->list,
+					   struct attachment_list, list);
+
 		dma_buf_detach(sgt_info->dma_buf, attachl->attach);
 		list_del(&attachl->list);
 		kfree(attachl);
 		break;
 
 	case HYPER_DMABUF_OPS_MAP:
-		sgtl = kcalloc(1, sizeof(*sgtl), GFP_KERNEL);
+		if (list_empty(&sgt_info->active_attached->list)) {
+			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_MAP\n");
+			printk("no more dmabuf attachment left to be detached\n");
+			return -EINVAL;
+		}
+
 		attachl = list_first_entry(&sgt_info->active_attached->list,
-					struct attachment_list, list);
+					   struct attachment_list, list);
+
+		sgtl = kcalloc(1, sizeof(*sgtl), GFP_KERNEL);
 		sgtl->sgt = dma_buf_map_attachment(attachl->attach, DMA_BIDIRECTIONAL);
 		if (!sgtl->sgt) {
 			kfree(sgtl);
@@ -71,17 +95,20 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		break;
 
 	case HYPER_DMABUF_OPS_UNMAP:
-		attachl = list_first_entry(&sgt_info->active_attached->list,
-					struct attachment_list, list);
-		sgtl = list_first_entry(&sgt_info->active_sgts->list,
-					struct sgt_list, list);
-		if (!attachl || !sgtl) {
+		if (list_empty(&sgt_info->active_sgts->list) ||
+		    list_empty(&sgt_info->active_attached->list)) {
 			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_UNMAP\n");
+			printk("no more SGT or attachment left to be freed\n");
 			return -EINVAL;
 		}
 
+		attachl = list_first_entry(&sgt_info->active_attached->list,
+					   struct attachment_list, list);
+		sgtl = list_first_entry(&sgt_info->active_sgts->list,
+					struct sgt_list, list);
+
 		dma_buf_unmap_attachment(attachl->attach, sgtl->sgt,
-					DMA_BIDIRECTIONAL);
+					 DMA_BIDIRECTIONAL);
 		list_del(&sgtl->list);
 		kfree(sgtl);
 		break;
@@ -129,9 +156,15 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 	case HYPER_DMABUF_OPS_KUNMAP_ATOMIC:
 	case HYPER_DMABUF_OPS_KUNMAP:
+		if (list_empty(&sgt_info->va_kmapped->list)) {
+			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
+			printk("no more dmabuf VA to be freed\n");
+			return -EINVAL;
+		}
+
 		va_kmapl = list_first_entry(&sgt_info->va_kmapped->list,
-					struct kmap_vaddr_list, list);
-		if (!va_kmapl || va_kmapl->vaddr == NULL) {
+					    struct kmap_vaddr_list, list);
+		if (va_kmapl->vaddr == NULL) {
 			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
 			return -EINVAL;
 		}
@@ -167,6 +200,11 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		break;
 
 	case HYPER_DMABUF_OPS_VUNMAP:
+		if (list_empty(&sgt_info->va_vmapped->list)) {
+			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VUNMAP\n");
+			printk("no more dmabuf VA to be freed\n");
+			return -EINVAL;
+		}
 		va_vmapl = list_first_entry(&sgt_info->va_vmapped->list,
 					struct vmap_vaddr_list, list);
 		if (!va_vmapl || va_vmapl->vaddr == NULL) {
