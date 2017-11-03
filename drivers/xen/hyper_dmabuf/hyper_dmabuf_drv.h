@@ -1,6 +1,11 @@
 #ifndef __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__
 #define __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__
 
+struct hyper_dmabuf_private {
+        struct device *device;
+	struct workqueue_struct *work_queue;
+};
+
 typedef int (*hyper_dmabuf_ioctl_t)(void *data);
 
 struct hyper_dmabuf_ioctl_desc {

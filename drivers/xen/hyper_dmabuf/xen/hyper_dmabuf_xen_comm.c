@@ -14,7 +14,6 @@
 #include "../hyper_dmabuf_msg.h"
 
 static int export_req_id = 0;
-static int import_req_id = 0;
 
 int32_t hyper_dmabuf_get_domid(void)
 {
@@ -35,12 +34,6 @@ int hyper_dmabuf_next_req_id_export(void)
 {
         export_req_id++;
         return export_req_id;
-}
-
-int hyper_dmabuf_next_req_id_import(void)
-{
-        import_req_id++;
-        return import_req_id;
 }
 
 /* For now cache latast rings as global variables TODO: keep them in list*/
@@ -81,7 +74,8 @@ int hyper_dmabuf_exporter_ringbuf_init(int rdomain, grant_ref_t *refid, int *por
 
 	alloc_unbound.dom = DOMID_SELF;
 	alloc_unbound.remote_dom = rdomain;
-	ret = HYPERVISOR_event_channel_op(EVTCHNOP_alloc_unbound, &alloc_unbound);
+	ret = HYPERVISOR_event_channel_op(EVTCHNOP_alloc_unbound,
+					&alloc_unbound);
 	if (ret != 0) {
 		printk("Cannot allocate event channel\n");
 		return -EINVAL;
@@ -96,7 +90,8 @@ int hyper_dmabuf_exporter_ringbuf_init(int rdomain, grant_ref_t *refid, int *por
 		printk("Failed to setup event channel\n");
 		close.port = alloc_unbound.port;
 		HYPERVISOR_event_channel_op(EVTCHNOP_close, &close);
-		gnttab_end_foreign_access(ring_info->gref_ring, 0, virt_to_mfn(shared_ring));
+		gnttab_end_foreign_access(ring_info->gref_ring, 0,
+					virt_to_mfn(shared_ring));
 		return -EINVAL;
 	}
 
@@ -108,7 +103,8 @@ int hyper_dmabuf_exporter_ringbuf_init(int rdomain, grant_ref_t *refid, int *por
 	*refid = ring_info->gref_ring;
 	*port = ring_info->port;
 
-	printk("%s: allocated eventchannel gref %d  port: %d  irq: %d\n", __func__,
+	printk("%s: allocated eventchannel gref %d  port: %d  irq: %d\n",
+		__func__,
 		ring_info->gref_ring,
 		ring_info->port,
 		ring_info->irq);
@@ -162,8 +158,9 @@ int hyper_dmabuf_importer_ringbuf_init(int sdomain, grant_ref_t gref, int port)
 
 	BACK_RING_INIT(&ring_info->ring_back, sring, PAGE_SIZE);
 
-	ret = bind_interdomain_evtchn_to_irqhandler(sdomain, port, hyper_dmabuf_back_ring_isr, 0,
-						    NULL, (void*)ring_info);
+	ret = bind_interdomain_evtchn_to_irqhandler(sdomain, port,
+						hyper_dmabuf_back_ring_isr, 0,
+						NULL, (void*)ring_info);
 	if (ret < 0) {
 		return -EINVAL;
 	}
@@ -216,26 +213,20 @@ int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req)
 	return 0;
 }
 
-/* called by interrupt (WORKQUEUE) */
-int hyper_dmabuf_send_response(struct hyper_dmabuf_ring_rp* response, int domain)
-{
-	/* as a importer and as a exporter */
-	return 0;
-}
-
 /* ISR for request from exporter (as an importer) */
-static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *dev_id)
+static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *info)
 {
 	RING_IDX rc, rp;
-	struct hyper_dmabuf_ring_rq request;
-	struct hyper_dmabuf_ring_rp response;
+	struct hyper_dmabuf_ring_rq req;
+	struct hyper_dmabuf_ring_rp resp;
+
 	int notify, more_to_do;
 	int ret;
-//	struct hyper_dmabuf_work *work;
 
-	struct hyper_dmabuf_ring_info_import *ring_info = (struct hyper_dmabuf_ring_info_import *)dev_id;
+	struct hyper_dmabuf_ring_info_import *ring_info;
 	struct hyper_dmabuf_back_ring *ring;
 
+	ring_info = (struct hyper_dmabuf_ring_info_import *)info;
 	ring = &ring_info->ring_back;
 
 	do {
@@ -246,22 +237,16 @@ static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *dev_id)
 			if (RING_REQUEST_CONS_OVERFLOW(ring, rc))
 				break;
 
-			memcpy(&request, RING_GET_REQUEST(ring, rc), sizeof(request));
+			memcpy(&req, RING_GET_REQUEST(ring, rc), sizeof(req));
 			printk("Got request\n");
 			ring->req_cons = ++rc;
 
-			/* TODO: probably using linked list for multiple requests then let
-			 * a task in a workqueue to process those is better idea becuase
-			 * we do not want to stay in ISR for long.
-			 */
-			ret = hyper_dmabuf_msg_parse(ring_info->sdomain, &request);
+			ret = hyper_dmabuf_msg_parse(ring_info->sdomain, &req);
 
 			if (ret > 0) {
-				/* build response */
-				memcpy(&response, &request, sizeof(response));
-
-				/* we sent back modified request as a response.. we might just need to have request only..*/
-				memcpy(RING_GET_RESPONSE(ring, ring->rsp_prod_pvt), &response, sizeof(response));
+				memcpy(&resp, &req, sizeof(resp));
+				memcpy(RING_GET_RESPONSE(ring, ring->rsp_prod_pvt), &resp,
+							sizeof(resp));
 				ring->rsp_prod_pvt++;
 
 				RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
@@ -281,15 +266,17 @@ static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *dev_id)
 }
 
 /* ISR for responses from importer */
-static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *dev_id)
+static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *info)
 {
 	/* front ring only care about response from back */
-	struct hyper_dmabuf_ring_rp *response;
+	struct hyper_dmabuf_ring_rp *resp;
 	RING_IDX i, rp;
 	int more_to_do, ret;
 
-	struct hyper_dmabuf_ring_info_export *ring_info = (struct hyper_dmabuf_ring_info_export *)dev_id;
+	struct hyper_dmabuf_ring_info_export *ring_info;
 	struct hyper_dmabuf_front_ring *ring;
+
+	ring_info = (struct hyper_dmabuf_ring_info_export *)info;
 	ring = &ring_info->ring_front;
 
 	do {
@@ -298,20 +285,18 @@ static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *dev_id)
 		for (i = ring->rsp_cons; i != rp; i++) {
 			unsigned long id;
 
-			response = RING_GET_RESPONSE(ring, i);
-			id = response->response_id;
+			resp = RING_GET_RESPONSE(ring, i);
+			id = resp->response_id;
 
-			if (response->status == HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP) {
+			if (resp->status == HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP) {
 				/* parsing response */
-				ret = hyper_dmabuf_msg_parse(ring_info->rdomain, (struct hyper_dmabuf_ring_rq*)response);
+				ret = hyper_dmabuf_msg_parse(ring_info->rdomain,
+							(struct hyper_dmabuf_ring_rq *)resp);
 
 				if (ret < 0) {
 					printk("getting error while parsing response\n");
 				}
-			} else if (response->status == HYPER_DMABUF_REQ_ERROR) {
-				printk("remote domain %d couldn't process request %d\n", ring_info->rdomain, response->command);
 			}
-
 		}
 
 		ring->rsp_cons = i;
