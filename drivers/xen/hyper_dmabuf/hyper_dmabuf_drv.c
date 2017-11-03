@@ -1,5 +1,8 @@
 #include <linux/init.h>       /* module_init, module_exit */
 #include <linux/module.h> /* version info, MODULE_LICENSE, MODULE_AUTHOR, printk() */
+#include <linux/workqueue.h>
+#include <xen/grant_table.h>
+#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_conf.h"
 #include "hyper_dmabuf_list.h"
 #include "xen/hyper_dmabuf_xen_comm_list.h"
@@ -9,6 +12,8 @@ MODULE_AUTHOR("IOTG-PED, INTEL");
 
 int register_device(void);
 int unregister_device(void);
+
+struct hyper_dmabuf_private hyper_dmabuf_private;
 
 /*===============================================================================================*/
 static int hyper_dmabuf_drv_init(void)
@@ -23,6 +28,10 @@ static int hyper_dmabuf_drv_init(void)
 	}
 
 	printk( KERN_NOTICE "initializing database for imported/exported dmabufs\n");
+
+	/* device structure initialization */
+	/* currently only does work-queue initialization */
+	hyper_dmabuf_private.work_queue = create_workqueue("hyper_dmabuf_wqueue");
 
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {
@@ -44,6 +53,10 @@ static void hyper_dmabuf_drv_exit(void)
 	/* hash tables for export/import entries and ring_infos */
 	hyper_dmabuf_table_destroy();
 	hyper_dmabuf_ring_table_init();
+
+	/* destroy workqueue */
+	if (hyper_dmabuf_private.work_queue)
+		destroy_workqueue(hyper_dmabuf_private.work_queue);
 
 	printk( KERN_NOTICE "dma_buf-src_sink model: Exiting" );
 	unregister_device();

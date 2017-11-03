@@ -36,16 +36,9 @@ struct hyper_dmabuf_ring_info_import {
         struct hyper_dmabuf_back_ring ring_back;
 };
 
-//struct hyper_dmabuf_work {
-//	hyper_dmabuf_ring_rq requrest;
-//	struct work_struct msg_parse;
-//};
-
 int32_t hyper_dmabuf_get_domid(void);
 
 int hyper_dmabuf_next_req_id_export(void);
-
-int hyper_dmabuf_next_req_id_import(void);
 
 /* exporter needs to generated info for page sharing */
 int hyper_dmabuf_exporter_ringbuf_init(int rdomain, grant_ref_t *gref, int *port);

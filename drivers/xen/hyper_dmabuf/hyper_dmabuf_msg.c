@@ -3,11 +3,22 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/dma-buf.h>
+#include <xen/grant_table.h>
+#include <linux/workqueue.h>
+#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_imp.h"
 //#include "hyper_dmabuf_remote_sync.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
+
+extern struct hyper_dmabuf_private hyper_dmabuf_private;
+
+struct cmd_process {
+	struct work_struct work;
+	struct hyper_dmabuf_ring_rq *rq;
+	int domid;
+};
 
 void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 				        enum hyper_dmabuf_command command, int *operands)
@@ -71,18 +82,17 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 	}
 }
 
-int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
+void cmd_process_work(struct work_struct *work)
 {
-	uint32_t i, ret;
 	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
-	struct hyper_dmabuf_sgt_info *sgt_info;
+        struct hyper_dmabuf_sgt_info *sgt_info;
+	struct cmd_process *proc = container_of(work, struct cmd_process, work);
+	struct hyper_dmabuf_ring_rq *req;
+	int domid;
+	int i;
 
-	/* make sure req is not NULL (may not be needed) */
-	if (!req) {
-		return -EINVAL;
-	}
-
-	req->status = HYPER_DMABUF_REQ_PROCESSED;
+	req = proc->rq;
+	domid = proc->domid;
 
 	switch (req->command) {
 	case HYPER_DMABUF_EXPORT:
@@ -113,33 +123,6 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 			imported_sgt_info->private[i] = req->operands[5+i];
 
 		hyper_dmabuf_register_imported(imported_sgt_info);
-		break;
-
-	case HYPER_DMABUF_DESTROY:
-		/* destroy sg_list for hyper_dmabuf_id on remote side */
-		/* command : DMABUF_DESTROY,
-		 * operands0 : hyper_dmabuf_id
-		 */
-
-		imported_sgt_info =
-			hyper_dmabuf_find_imported(req->operands[0]);
-
-		if (imported_sgt_info) {
-			hyper_dmabuf_cleanup_imported_pages(imported_sgt_info);
-
-			hyper_dmabuf_remove_imported(req->operands[0]);
-
-			/* TODO: cleanup sgt on importer side etc */
-		}
-
-		/* Notify exporter that buffer is freed and it can cleanup it */
-		req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
-		req->command = HYPER_DMABUF_DESTROY_FINISH;
-
-#if 0 /* function is not implemented yet */
-
-		ret = hyper_dmabuf_destroy_sgt(req->hyper_dmabuf_id);
-#endif
 		break;
 
 	case HYPER_DMABUF_DESTROY_FINISH:
@@ -180,33 +163,101 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 		 */
 		break;
 
-	/* requesting the other side to setup another ring channel for reverse direction */
-	case HYPER_DMABUF_EXPORTER_RING_SETUP:
-		/* command: HYPER_DMABUF_EXPORTER_RING_SETUP
-		 * no operands needed */
-		ret = hyper_dmabuf_exporter_ringbuf_init(domid, &req->operands[0], &req->operands[1]);
-		if (ret < 0) {
-			req->status = HYPER_DMABUF_REQ_ERROR;
-			return -EINVAL;
-		}
-
-		req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
-		req->command = HYPER_DMABUF_IMPORTER_RING_SETUP;
-		break;
-
 	case HYPER_DMABUF_IMPORTER_RING_SETUP:
 		/* command: HYPER_DMABUF_IMPORTER_RING_SETUP */
 		/* no operands needed */
-		ret = hyper_dmabuf_importer_ringbuf_init(domid, req->operands[0], req->operands[1]);
-		if (ret < 0)
-			return -EINVAL;
+		hyper_dmabuf_importer_ringbuf_init(domid, req->operands[0], req->operands[1]);
 
 		break;
 
 	default:
+		/* shouldn't get here */
 		/* no matched command, nothing to do.. just return error */
+		break;
+	}
+
+	kfree(req);
+	kfree(proc);
+}
+
+int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
+{
+	struct cmd_process *proc;
+	struct hyper_dmabuf_ring_rq *temp_req;
+	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	int ret;
+
+	if (!req) {
+		printk("request is NULL\n");
 		return -EINVAL;
 	}
+
+	if ((req->command < HYPER_DMABUF_EXPORT) ||
+		(req->command > HYPER_DMABUF_IMPORTER_RING_SETUP)) {
+		printk("invalid command\n");
+		return -EINVAL;
+	}
+
+	req->status = HYPER_DMABUF_REQ_PROCESSED;
+
+	/* HYPER_DMABUF_EXPORTER_RING_SETUP requires immediate
+	 * follow up so can't be processed in workqueue
+	 */
+	if (req->command == HYPER_DMABUF_EXPORTER_RING_SETUP) {
+		ret = hyper_dmabuf_exporter_ringbuf_init(domid, &req->operands[0], &req->operands[1]);
+		if (ret < 0) {
+			req->status = HYPER_DMABUF_REQ_ERROR;
+		}
+
+		req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
+		req->command = HYPER_DMABUF_IMPORTER_RING_SETUP;
+
+		return req->command;
+	}
+
+	/* HYPER_DMABUF_DESTROY requires immediate
+	 * follow up so can't be processed in workqueue
+	 */
+	if (req->command == HYPER_DMABUF_DESTROY) {
+		/* destroy sg_list for hyper_dmabuf_id on remote side */
+		/* command : DMABUF_DESTROY,
+		 * operands0 : hyper_dmabuf_id
+		 */
+		imported_sgt_info =
+			hyper_dmabuf_find_imported(req->operands[0]);
+
+		if (imported_sgt_info) {
+			hyper_dmabuf_cleanup_imported_pages(imported_sgt_info);
+
+			hyper_dmabuf_remove_imported(req->operands[0]);
+
+			/* TODO: cleanup sgt on importer side etc */
+		}
+
+		/* Notify exporter that buffer is freed and it can cleanup it */
+		req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
+		req->command = HYPER_DMABUF_DESTROY_FINISH;
+
+#if 0 /* function is not implemented yet */
+
+		ret = hyper_dmabuf_destroy_sgt(req->hyper_dmabuf_id);
+#endif
+		return req->command;
+	}
+
+	temp_req = (struct hyper_dmabuf_ring_rq *)kmalloc(sizeof(*temp_req), GFP_KERNEL);
+
+	memcpy(temp_req, req, sizeof(*temp_req));
+
+	proc = (struct cmd_process *) kcalloc(1, sizeof(struct cmd_process),
+						GFP_KERNEL);
+
+	proc->rq = temp_req;
+	proc->domid = domid;
+
+	INIT_WORK(&(proc->work), cmd_process_work);
+
+	queue_work(hyper_dmabuf_private.work_queue, &(proc->work));
 
 	return req->command;
 }

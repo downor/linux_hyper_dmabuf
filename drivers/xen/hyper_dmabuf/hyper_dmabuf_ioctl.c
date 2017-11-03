@@ -15,9 +15,7 @@
 #include "xen/hyper_dmabuf_xen_comm_list.h"
 #include "hyper_dmabuf_msg.h"
 
-struct hyper_dmabuf_private {
-	struct device *device;
-} hyper_dmabuf_private;
+extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 static uint32_t hyper_dmabuf_id_gen(void) {
 	/* TODO: add proper implementation */
