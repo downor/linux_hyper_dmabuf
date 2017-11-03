@@ -532,7 +532,7 @@ static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf, struct device* dev,
 						HYPER_DMABUF_OPS_ATTACH);
 
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return ret;
@@ -552,7 +552,7 @@ static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf, struct dma_buf_attac
 						HYPER_DMABUF_OPS_DETACH);
 
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -586,7 +586,7 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 						HYPER_DMABUF_OPS_MAP);
 
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return st;
@@ -618,7 +618,7 @@ static void hyper_dmabuf_ops_unmap(struct dma_buf_attachment *attachment,
 						HYPER_DMABUF_OPS_UNMAP);
 
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -636,7 +636,7 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dmabuf)
 						HYPER_DMABUF_OPS_RELEASE);
 
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -653,7 +653,7 @@ static int hyper_dmabuf_ops_begin_cpu_access(struct dma_buf *dmabuf, enum dma_da
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return ret;
@@ -672,7 +672,7 @@ static int hyper_dmabuf_ops_end_cpu_access(struct dma_buf *dmabuf, enum dma_data
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_END_CPU_ACCESS);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return 0;
@@ -691,7 +691,7 @@ static void *hyper_dmabuf_ops_kmap_atomic(struct dma_buf *dmabuf, unsigned long 
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_KMAP_ATOMIC);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return NULL; /* for now NULL.. need to return the address of mapped region */
@@ -710,7 +710,7 @@ static void hyper_dmabuf_ops_kunmap_atomic(struct dma_buf *dmabuf, unsigned long
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_KUNMAP_ATOMIC);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -727,7 +727,7 @@ static void *hyper_dmabuf_ops_kmap(struct dma_buf *dmabuf, unsigned long pgnum)
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_KMAP);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return NULL; /* for now NULL.. need to return the address of mapped region */
@@ -746,7 +746,7 @@ static void hyper_dmabuf_ops_kunmap(struct dma_buf *dmabuf, unsigned long pgnum,
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_KUNMAP);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -763,7 +763,7 @@ static int hyper_dmabuf_ops_mmap(struct dma_buf *dmabuf, struct vm_area_struct *
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_MMAP);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return ret;
@@ -782,7 +782,7 @@ static void *hyper_dmabuf_ops_vmap(struct dma_buf *dmabuf)
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_VMAP);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return NULL;
@@ -801,7 +801,7 @@ static void hyper_dmabuf_ops_vunmap(struct dma_buf *dmabuf, void *vaddr)
 	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
 						HYPER_DMABUF_OPS_VUNMAP);
 	if (ret < 0) {
-		printk("send dmabuf sync request failed\n");
+		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 

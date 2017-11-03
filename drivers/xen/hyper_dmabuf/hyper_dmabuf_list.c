@@ -65,13 +65,13 @@ struct hyper_dmabuf_sgt_info *hyper_dmabuf_find_exported(int id)
 }
 
 /* search for pre-exported sgt and return id of it if it exist */
-int hyper_dmabuf_find_id(struct dma_buf_attachment *attach, int domid)
+int hyper_dmabuf_find_id(struct dma_buf *dmabuf, int domid)
 {
 	struct hyper_dmabuf_info_entry_exported *info_entry;
 	int bkt;
 
 	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node)
-		if(info_entry->info->attachment == attach &&
+		if(info_entry->info->attachment->dmabuf == dmabuf &&
 			info_entry->info->hyper_dmabuf_rdomain == domid)
 			return info_entry->info->hyper_dmabuf_id;
 
