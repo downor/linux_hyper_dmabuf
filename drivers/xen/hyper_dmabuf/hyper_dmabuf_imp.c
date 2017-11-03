@@ -169,7 +169,8 @@ grant_ref_t hyper_dmabuf_create_addressing_tables(grant_ref_t *data_refs, int ne
 	/*
 	 * Calculate number of pages needed for 2nd level addresing:
 	 */
-	int n_2nd_level_pages = (nents/REFS_PER_PAGE + ((nents % REFS_PER_PAGE) ? 1: 0));/* rounding */
+	int n_2nd_level_pages = (nents/REFS_PER_PAGE +
+				((nents % REFS_PER_PAGE) ? 1: 0));
 	int i;
 	unsigned long gref_page_start;
 	grant_ref_t *tmp_page;
@@ -187,7 +188,9 @@ grant_ref_t hyper_dmabuf_create_addressing_tables(grant_ref_t *data_refs, int ne
 
 	/* Share 2nd level addressing pages in readonly mode*/
 	for (i=0; i< n_2nd_level_pages; i++) {
-		addr_refs[i] = gnttab_grant_foreign_access(rdomain, virt_to_mfn((unsigned long)tmp_page+i*PAGE_SIZE ), 1);
+		addr_refs[i] = gnttab_grant_foreign_access(rdomain,
+							   virt_to_mfn((unsigned long)tmp_page+i*PAGE_SIZE ),
+							   1);
 	}
 
 	/*
@@ -213,7 +216,9 @@ grant_ref_t hyper_dmabuf_create_addressing_tables(grant_ref_t *data_refs, int ne
 	}
 
 	/* Share top level addressing page in readonly mode*/
-	top_level_ref = gnttab_grant_foreign_access(rdomain, virt_to_mfn((unsigned long)tmp_page), 1);
+	top_level_ref = gnttab_grant_foreign_access(rdomain,
+						    virt_to_mfn((unsigned long)tmp_page),
+						    1);
 
 	kfree(addr_refs);
 
@@ -255,7 +260,9 @@ struct page** hyper_dmabuf_get_data_refs(grant_ref_t top_level_ref, int domid, i
 	}
 
 	addr = (unsigned long)pfn_to_kaddr(page_to_pfn(top_level_page));
-	gnttab_set_map_op(&top_level_map_ops, addr, GNTMAP_host_map | GNTMAP_readonly, top_level_ref, domid);
+	gnttab_set_map_op(&top_level_map_ops, addr, GNTMAP_host_map | GNTMAP_readonly,
+			  top_level_ref, domid);
+
 	gnttab_set_unmap_op(&top_level_unmap_ops, addr, GNTMAP_host_map | GNTMAP_readonly, -1);
 
 	if (gnttab_map_refs(&top_level_map_ops, NULL, &top_level_page, 1)) {
@@ -282,7 +289,8 @@ struct page** hyper_dmabuf_get_data_refs(grant_ref_t top_level_ref, int domid, i
 
 	for (i = 0; i < n_level2_refs; i++) {
 		addr = (unsigned long)pfn_to_kaddr(page_to_pfn(level2_pages[i]));
-		gnttab_set_map_op(&map_ops[i], addr, GNTMAP_host_map | GNTMAP_readonly, top_level_refs[i], domid);
+		gnttab_set_map_op(&map_ops[i], addr, GNTMAP_host_map | GNTMAP_readonly,
+				  top_level_refs[i], domid);
 		gnttab_set_unmap_op(&unmap_ops[i], addr, GNTMAP_host_map | GNTMAP_readonly, -1);
 	}
 
@@ -295,7 +303,7 @@ struct page** hyper_dmabuf_get_data_refs(grant_ref_t top_level_ref, int domid, i
 	for (i = 0; i < n_level2_refs; i++) {
 		if (map_ops[i].status) {
 			printk("\nxen: dom0: HYPERVISOR map grant ref failed status = %d",
-					map_ops[i].status);
+			       map_ops[i].status);
 			return NULL;
 		} else {
 			unmap_ops[i].handle = map_ops[i].handle;
@@ -331,7 +339,9 @@ grant_ref_t hyper_dmabuf_create_gref_table(struct page **pages, int rdomain, int
 
 	/* share data pages in rw mode*/
 	for (i=0; i<nents; i++) {
-		data_refs[i] = gnttab_grant_foreign_access(rdomain, pfn_to_mfn(page_to_pfn(pages[i])), 0);
+		data_refs[i] = gnttab_grant_foreign_access(rdomain,
+							   pfn_to_mfn(page_to_pfn(pages[i])),
+							   0);
 	}
 
 	/* create additional shared pages with 2 level addressing of data pages */
@@ -350,7 +360,8 @@ int hyper_dmabuf_cleanup_gref_table(struct hyper_dmabuf_sgt_info *sgt_info) {
 	struct hyper_dmabuf_shared_pages_info *shared_pages_info = &sgt_info->shared_pages_info;
 
 	grant_ref_t *ref = shared_pages_info->top_level_page;
-	int n_2nd_level_pages = (sgt_info->sgt->nents/REFS_PER_PAGE + ((sgt_info->sgt->nents % REFS_PER_PAGE) ? 1: 0));/* rounding */
+	int n_2nd_level_pages = (sgt_info->active_sgts->sgt->nents/REFS_PER_PAGE +
+				((sgt_info->active_sgts->sgt->nents % REFS_PER_PAGE) ? 1: 0));
 
 
 	if (shared_pages_info->data_refs == NULL ||
@@ -384,7 +395,7 @@ int hyper_dmabuf_cleanup_gref_table(struct hyper_dmabuf_sgt_info *sgt_info) {
 	free_pages((unsigned long)shared_pages_info->top_level_page, 1);
 
 	/* End foreign access for data pages, but do not free them */
-	for (i = 0; i < sgt_info->sgt->nents; i++) {
+	for (i = 0; i < sgt_info->active_sgts->sgt->nents; i++) {
 		if (gnttab_query_foreign_access(shared_pages_info->data_refs[i])) {
 			printk("refid not shared !!\n");
 		}
@@ -404,12 +415,14 @@ int hyper_dmabuf_cleanup_gref_table(struct hyper_dmabuf_sgt_info *sgt_info) {
 int hyper_dmabuf_cleanup_imported_pages(struct hyper_dmabuf_imported_sgt_info *sgt_info) {
 	struct hyper_dmabuf_shared_pages_info *shared_pages_info = &sgt_info->shared_pages_info;
 
-	if(shared_pages_info->unmap_ops == NULL || shared_pages_info->data_pages == NULL) {
+	if(shared_pages_info->unmap_ops == NULL ||
+	   shared_pages_info->data_pages == NULL) {
 		printk("Imported pages already cleaned up or buffer was not imported yet\n");
 		return 0;
 	}
 
-	if (gnttab_unmap_refs(shared_pages_info->unmap_ops, NULL, shared_pages_info->data_pages, sgt_info->nents) ) {
+	if (gnttab_unmap_refs(shared_pages_info->unmap_ops, NULL,
+			      shared_pages_info->data_pages, sgt_info->nents) ) {
 		printk("Cannot unmap data pages\n");
 		return -EINVAL;
 	}
@@ -424,7 +437,8 @@ int hyper_dmabuf_cleanup_imported_pages(struct hyper_dmabuf_imported_sgt_info *s
 }
 
 /* map and construct sg_lists from reference numbers */
-struct sg_table* hyper_dmabuf_map_pages(grant_ref_t top_level_gref, int frst_ofst, int last_len, int nents, int sdomain,
+struct sg_table* hyper_dmabuf_map_pages(grant_ref_t top_level_gref, int frst_ofst,
+					int last_len, int nents, int sdomain,
 					struct hyper_dmabuf_shared_pages_info *shared_pages_info)
 {
 	struct sg_table *st;
@@ -451,13 +465,16 @@ struct sg_table* hyper_dmabuf_map_pages(grant_ref_t top_level_gref, int frst_ofs
 		return NULL;
 	}
 
-	ops = (struct gnttab_map_grant_ref *)kcalloc(nents, sizeof(struct gnttab_map_grant_ref), GFP_KERNEL);
-	unmap_ops = (struct gnttab_unmap_grant_ref *)kcalloc(nents, sizeof(struct gnttab_unmap_grant_ref), GFP_KERNEL);
+	ops = kcalloc(nents, sizeof(struct gnttab_map_grant_ref),
+		      GFP_KERNEL);
+	unmap_ops = kcalloc(nents, sizeof(struct gnttab_unmap_grant_ref),
+			    GFP_KERNEL);
 
 	for (i=0; i<nents; i++) {
 		addr = (unsigned long)pfn_to_kaddr(page_to_pfn(pages[i]));
 		refs = pfn_to_kaddr(page_to_pfn(refid_pages[i / REFS_PER_PAGE]));
-		gnttab_set_map_op(&ops[i], addr, GNTMAP_host_map | GNTMAP_readonly, refs[i % REFS_PER_PAGE], sdomain);
+		gnttab_set_map_op(&ops[i], addr, GNTMAP_host_map | GNTMAP_readonly,
+				refs[i % REFS_PER_PAGE], sdomain);
 		gnttab_set_unmap_op(&unmap_ops[i], addr, GNTMAP_host_map | GNTMAP_readonly, -1);
 	}
 
@@ -478,7 +495,8 @@ struct sg_table* hyper_dmabuf_map_pages(grant_ref_t top_level_gref, int frst_ofs
 
 	st = hyper_dmabuf_create_sgt(pages, frst_ofst, last_len, nents);
 
-	if (gnttab_unmap_refs(shared_pages_info->unmap_ops, NULL, refid_pages, n_level2_refs) ) {
+	if (gnttab_unmap_refs(shared_pages_info->unmap_ops, NULL, refid_pages,
+			n_level2_refs) ) {
 		printk("Cannot unmap 2nd level refs\n");
 		return NULL;
 	}
@@ -507,10 +525,8 @@ inline int hyper_dmabuf_sync_request_and_wait(int id, int ops)
 
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_OPS_TO_SOURCE, &operands[0]);
 
-	/* send request */
-	ret = hyper_dmabuf_send_request(id, req);
-
-	/* TODO: wait until it gets response.. or can we just move on? */
+	/* send request and wait for a response */
+	ret = hyper_dmabuf_send_request(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(id), req, true);
 
 	kfree(req);
 
@@ -528,14 +544,14 @@ static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf, struct device* dev,
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)attach->dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
-						HYPER_DMABUF_OPS_ATTACH);
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
+						 HYPER_DMABUF_OPS_ATTACH);
 
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		return ret;
 	}
 
-	/* Ignoring ret for now */
 	return 0;
 }
 
@@ -549,8 +565,8 @@ static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf, struct dma_buf_attac
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)attach->dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
-						HYPER_DMABUF_OPS_DETACH);
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
+						 HYPER_DMABUF_OPS_DETACH);
 
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -583,7 +599,7 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
                 goto err_free_sg;
         }
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_MAP);
 
 	if (ret < 0) {
@@ -615,7 +631,7 @@ static void hyper_dmabuf_ops_unmap(struct dma_buf_attachment *attachment,
 	sg_free_table(sg);
 	kfree(sg);
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_UNMAP);
 
 	if (ret < 0) {
@@ -633,7 +649,7 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dmabuf)
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_RELEASE);
 
 	if (ret < 0) {
@@ -651,7 +667,7 @@ static int hyper_dmabuf_ops_begin_cpu_access(struct dma_buf *dmabuf, enum dma_da
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -670,7 +686,7 @@ static int hyper_dmabuf_ops_end_cpu_access(struct dma_buf *dmabuf, enum dma_data
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_END_CPU_ACCESS);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -689,7 +705,7 @@ static void *hyper_dmabuf_ops_kmap_atomic(struct dma_buf *dmabuf, unsigned long 
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KMAP_ATOMIC);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -708,7 +724,7 @@ static void hyper_dmabuf_ops_kunmap_atomic(struct dma_buf *dmabuf, unsigned long
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KUNMAP_ATOMIC);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -725,7 +741,7 @@ static void *hyper_dmabuf_ops_kmap(struct dma_buf *dmabuf, unsigned long pgnum)
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KMAP);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -744,7 +760,7 @@ static void hyper_dmabuf_ops_kunmap(struct dma_buf *dmabuf, unsigned long pgnum,
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KUNMAP);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -761,7 +777,7 @@ static int hyper_dmabuf_ops_mmap(struct dma_buf *dmabuf, struct vm_area_struct *
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_MMAP);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -780,7 +796,7 @@ static void *hyper_dmabuf_ops_vmap(struct dma_buf *dmabuf)
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_VMAP);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -799,7 +815,7 @@ static void hyper_dmabuf_ops_vunmap(struct dma_buf *dmabuf, void *vaddr)
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request_and_wait(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(sgt_info->hyper_dmabuf_id),
+	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_VUNMAP);
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);

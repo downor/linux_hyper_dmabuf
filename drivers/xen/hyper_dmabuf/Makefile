@@ -7,6 +7,7 @@ ifneq ($(KERNELRELEASE),)
                                  hyper_dmabuf_list.o \
 				 hyper_dmabuf_imp.o \
 				 hyper_dmabuf_msg.o \
+				 hyper_dmabuf_remote_sync.o \
 				 xen/hyper_dmabuf_xen_comm.o \
 				 xen/hyper_dmabuf_xen_comm_list.o
 

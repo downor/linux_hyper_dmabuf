@@ -6,6 +6,7 @@
 #include <linux/uaccess.h>
 #include <linux/dma-buf.h>
 #include <linux/delay.h>
+#include <linux/list.h>
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_imp.h"
 #include "hyper_dmabuf_list.h"
@@ -121,7 +122,9 @@ static int hyper_dmabuf_export_remote(void *data)
 		return -1;
 	}
 
-	/* Clear ret, as that will cause whole ioctl to return failure to userspace, which is not true */
+	/* Clear ret, as that will cause whole ioctl to return failure
+	 * to userspace, which is not true
+	 */
 	ret = 0;
 
 	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
@@ -131,9 +134,25 @@ static int hyper_dmabuf_export_remote(void *data)
 	sgt_info->hyper_dmabuf_id = hyper_dmabuf_id_gen();
 	/* TODO: We might need to consider using port number on event channel? */
 	sgt_info->hyper_dmabuf_rdomain = export_remote_attr->remote_domain;
-	sgt_info->sgt = sgt;
-	sgt_info->attachment = attachment;
 	sgt_info->dma_buf = dma_buf;
+
+	sgt_info->active_sgts = kcalloc(1, sizeof(struct sgt_list), GFP_KERNEL);
+	sgt_info->active_attached = kcalloc(1, sizeof(struct attachment_list), GFP_KERNEL);
+	sgt_info->va_kmapped = kcalloc(1, sizeof(struct kmap_vaddr_list), GFP_KERNEL);
+	sgt_info->va_vmapped = kcalloc(1, sizeof(struct vmap_vaddr_list), GFP_KERNEL);
+
+	sgt_info->active_sgts->sgt = sgt;
+	sgt_info->active_attached->attach = attachment;
+	sgt_info->va_kmapped->vaddr = NULL; /* first vaddr is NULL */
+	sgt_info->va_vmapped->vaddr = NULL; /* first vaddr is NULL */
+
+	/* initialize list of sgt, attachment and vaddr for dmabuf sync
+	 * via shadow dma-buf
+	 */
+	INIT_LIST_HEAD(&sgt_info->active_sgts->list);
+	INIT_LIST_HEAD(&sgt_info->active_attached->list);
+	INIT_LIST_HEAD(&sgt_info->va_kmapped->list);
+	INIT_LIST_HEAD(&sgt_info->va_vmapped->list);
 
 	page_info = hyper_dmabuf_ext_pgs(sgt);
 	if (page_info == NULL)
@@ -155,7 +174,7 @@ static int hyper_dmabuf_export_remote(void *data)
 	operands[2] = page_info->frst_ofst;
 	operands[3] = page_info->last_len;
 	operands[4] = hyper_dmabuf_create_gref_table(page_info->pages, export_remote_attr->remote_domain,
-						page_info->nents, &sgt_info->shared_pages_info);
+						     page_info->nents, &sgt_info->shared_pages_info);
 	/* driver/application specific private info, max 32 bytes */
 	operands[5] = export_remote_attr->private[0];
 	operands[6] = export_remote_attr->private[1];
@@ -166,7 +185,7 @@ static int hyper_dmabuf_export_remote(void *data)
 
 	/* composing a message to the importer */
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT, &operands[0]);
-	if(hyper_dmabuf_send_request(export_remote_attr->remote_domain, req))
+	if(hyper_dmabuf_send_request(export_remote_attr->remote_domain, req, false))
 		goto fail_send_request;
 
 	/* free msg */
@@ -181,9 +200,16 @@ fail_send_request:
 	hyper_dmabuf_remove_exported(sgt_info->hyper_dmabuf_id);
 
 fail_export:
-	dma_buf_unmap_attachment(sgt_info->attachment, sgt_info->sgt, DMA_BIDIRECTIONAL);
-	dma_buf_detach(sgt_info->dma_buf, sgt_info->attachment);
+	dma_buf_unmap_attachment(sgt_info->active_attached->attach,
+				 sgt_info->active_sgts->sgt,
+				 DMA_BIDIRECTIONAL);
+	dma_buf_detach(sgt_info->dma_buf, sgt_info->active_attached->attach);
 	dma_buf_put(sgt_info->dma_buf);
+
+	kfree(sgt_info->active_attached);
+	kfree(sgt_info->active_sgts);
+	kfree(sgt_info->va_kmapped);
+	kfree(sgt_info->va_vmapped);
 
 	return -EINVAL;
 }
@@ -233,7 +259,8 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 }
 
 /* removing dmabuf from the database and send int req to the source domain
-* to unmap it. */
+ * to unmap it.
+ */
 static int hyper_dmabuf_destroy(void *data)
 {
 	struct ioctl_hyper_dmabuf_destroy *destroy_attr;
@@ -250,7 +277,9 @@ static int hyper_dmabuf_destroy(void *data)
 
 	/* find dmabuf in export list */
 	sgt_info = hyper_dmabuf_find_exported(destroy_attr->hyper_dmabuf_id);
-	if (sgt_info == NULL) { /* failed to find corresponding entry in export list */
+
+	/* failed to find corresponding entry in export list */
+	if (sgt_info == NULL) {
 		destroy_attr->status = -EINVAL;
 		return -EFAULT;
 	}
@@ -260,8 +289,9 @@ static int hyper_dmabuf_destroy(void *data)
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_DESTROY, &destroy_attr->hyper_dmabuf_id);
 
 	/* now send destroy request to remote domain
-	 * currently assuming there's only one importer exist */
-	ret = hyper_dmabuf_send_request(sgt_info->hyper_dmabuf_rdomain, req);
+	 * currently assuming there's only one importer exist
+	 */
+	ret = hyper_dmabuf_send_request(sgt_info->hyper_dmabuf_rdomain, req, true);
 	if (ret < 0) {
 		kfree(req);
 		return -EFAULT;

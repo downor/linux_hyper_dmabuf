@@ -18,6 +18,30 @@
  * frame buffer) */
 #define MAX_ALLOWED_NUM_PAGES_FOR_GREF_NUM_ARRAYS 4
 
+/* stack of mapped sgts */
+struct sgt_list {
+	struct sg_table *sgt;
+	struct list_head list;
+};
+
+/* stack of attachments */
+struct attachment_list {
+	struct dma_buf_attachment *attach;
+	struct list_head list;
+};
+
+/* stack of vaddr mapped via kmap */
+struct kmap_vaddr_list {
+	void *vaddr;
+	struct list_head list;
+};
+
+/* stack of vaddr mapped via vmap */
+struct vmap_vaddr_list {
+	void *vaddr;
+	struct list_head list;
+};
+
 struct hyper_dmabuf_shared_pages_info {
 	grant_ref_t *data_refs;	/* table with shared buffer pages refid */
 	grant_ref_t *addr_pages; /* pages of 2nd level addressing */
@@ -46,9 +70,13 @@ struct hyper_dmabuf_pages_info {
 struct hyper_dmabuf_sgt_info {
         int hyper_dmabuf_id; /* unique id to reference dmabuf in remote domain */
 	int hyper_dmabuf_rdomain; /* domain importing this sgt */
-        struct sg_table *sgt; /* pointer to sgt */
+
 	struct dma_buf *dma_buf; /* needed to store this for freeing it later */
-	struct dma_buf_attachment *attachment; /* needed to store this for freeing this later */
+	struct sgt_list *active_sgts;
+	struct attachment_list *active_attached;
+	struct kmap_vaddr_list *va_kmapped;
+	struct vmap_vaddr_list *va_vmapped;
+
 	struct hyper_dmabuf_shared_pages_info shared_pages_info;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };

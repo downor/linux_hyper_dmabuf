@@ -33,7 +33,7 @@ int hyper_dmabuf_register_exported(struct hyper_dmabuf_sgt_info *info)
 	info_entry->info = info;
 
 	hash_add(hyper_dmabuf_hash_exported, &info_entry->node,
-		info_entry->info->hyper_dmabuf_id);
+		 info_entry->info->hyper_dmabuf_id);
 
 	return 0;
 }
@@ -47,7 +47,7 @@ int hyper_dmabuf_register_imported(struct hyper_dmabuf_imported_sgt_info* info)
 	info_entry->info = info;
 
 	hash_add(hyper_dmabuf_hash_imported, &info_entry->node,
-		info_entry->info->hyper_dmabuf_id);
+		 info_entry->info->hyper_dmabuf_id);
 
 	return 0;
 }
@@ -71,8 +71,8 @@ int hyper_dmabuf_find_id(struct dma_buf *dmabuf, int domid)
 	int bkt;
 
 	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node)
-		if(info_entry->info->attachment->dmabuf == dmabuf &&
-			info_entry->info->hyper_dmabuf_rdomain == domid)
+		if(info_entry->info->dma_buf == dmabuf &&
+		   info_entry->info->hyper_dmabuf_rdomain == domid)
 			return info_entry->info->hyper_dmabuf_id;
 
 	return -1;
