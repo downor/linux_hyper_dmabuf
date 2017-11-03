@@ -85,6 +85,7 @@ int hyper_dmabuf_remove_exporter_ring(int domid)
 	hash_for_each(hyper_dmabuf_hash_exporter_ring, bkt, info_entry, node)
 		if(info_entry->info->rdomain == domid) {
 			hash_del(&info_entry->node);
+			kfree(info_entry);
 			return 0;
 		}
 
@@ -99,6 +100,7 @@ int hyper_dmabuf_remove_importer_ring(int domid)
 	hash_for_each(hyper_dmabuf_hash_importer_ring, bkt, info_entry, node)
 		if(info_entry->info->sdomain == domid) {
 			hash_del(&info_entry->node);
+			kfree(info_entry);
 			return 0;
 		}
 

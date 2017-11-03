@@ -98,6 +98,7 @@ int hyper_dmabuf_remove_exported(int id)
 	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node)
 		if(info_entry->info->hyper_dmabuf_id == id) {
 			hash_del(&info_entry->node);
+			kfree(info_entry);
 			return 0;
 		}
 
@@ -112,6 +113,7 @@ int hyper_dmabuf_remove_imported(int id)
 	hash_for_each(hyper_dmabuf_hash_imported, bkt, info_entry, node)
 		if(info_entry->info->hyper_dmabuf_id == id) {
 			hash_del(&info_entry->node);
+			kfree(info_entry);
 			return 0;
 		}
 
