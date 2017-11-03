@@ -86,9 +86,20 @@ static int hyper_dmabuf_export_remote(void *data)
 	export_remote_attr = (struct ioctl_hyper_dmabuf_export_remote *)data;
 
 	dma_buf = dma_buf_get(export_remote_attr->dmabuf_fd);
+
 	if (!dma_buf) {
 		printk("Cannot get dma buf\n");
 		return -1;
+	}
+
+	/* we check if this specific attachment was already exported
+	 * to the same domain and if yes, it returns hyper_dmabuf_id
+	 * of pre-exported sgt */
+	ret = hyper_dmabuf_find_id(dma_buf, export_remote_attr->remote_domain);
+	if (ret != -1) {
+		dma_buf_put(dma_buf);
+		export_remote_attr->hyper_dmabuf_id = ret;
+		return 0;
 	}
 
 	attachment = dma_buf_attach(dma_buf, hyper_dmabuf_private.device);
@@ -97,16 +108,6 @@ static int hyper_dmabuf_export_remote(void *data)
 		return -1;
 	}
 
-	/* we check if this specific attachment was already exported
-	 * to the same domain and if yes, it returns hyper_dmabuf_id
-	 * of pre-exported sgt */
-	ret = hyper_dmabuf_find_id(attachment, export_remote_attr->remote_domain);
-	if (ret != -1) {
-		dma_buf_detach(dma_buf, attachment);
-		dma_buf_put(dma_buf);
-		export_remote_attr->hyper_dmabuf_id = ret;
-		return 0;
-	}
 	/* Clear ret, as that will cause whole ioctl to return failure to userspace, which is not true */
 	ret = 0;
 
