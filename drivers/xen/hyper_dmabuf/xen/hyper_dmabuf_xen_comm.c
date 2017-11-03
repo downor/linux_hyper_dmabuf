@@ -320,6 +320,8 @@ int hyper_dmabuf_importer_ringbuf_init(int sdomain)
 		ring_info->unmap_op.handle = ops[0].handle;
 	}
 
+	kfree(ops);
+
 	sring = (struct hyper_dmabuf_sring*) pfn_to_kaddr(page_to_pfn(shared_ring));
 
 	BACK_RING_INIT(&ring_info->ring_back, sring, PAGE_SIZE);

@@ -191,6 +191,7 @@ static int hyper_dmabuf_export_remote(void *data)
 	/* free msg */
 	kfree(req);
 	/* free page_info */
+	kfree(page_info->pages);
 	kfree(page_info);
 
 	return ret;
