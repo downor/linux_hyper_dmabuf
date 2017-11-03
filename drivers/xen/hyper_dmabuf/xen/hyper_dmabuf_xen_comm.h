@@ -61,7 +61,7 @@ void hyper_dmabuf_importer_ringbuf_cleanup(int sdomain);
 void hyper_dmabuf_cleanup_ringbufs(void);
 
 /* send request to the remote domain */
-int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req);
+int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req, int wait);
 
 /* called by interrupt (WORKQUEUE) */
 int hyper_dmabuf_send_response(struct hyper_dmabuf_ring_rp* response, int domain);

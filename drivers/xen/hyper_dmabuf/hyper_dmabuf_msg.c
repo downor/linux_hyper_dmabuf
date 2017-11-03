@@ -7,7 +7,7 @@
 #include <linux/workqueue.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_imp.h"
-//#include "hyper_dmabuf_remote_sync.h"
+#include "hyper_dmabuf_remote_sync.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
@@ -125,7 +125,9 @@ void cmd_process_work(struct work_struct *work)
 		 * operands0 : hyper_dmabuf_id
 		 */
 
-		/* TODO: that should be done on workqueue, when received ack from all importers that buffer is no longer used */
+		/* TODO: that should be done on workqueue, when received ack from
+		 * all importers that buffer is no longer used
+		 */
 		sgt_info =
 			hyper_dmabuf_find_exported(req->operands[0]);
 
@@ -133,8 +135,10 @@ void cmd_process_work(struct work_struct *work)
 			hyper_dmabuf_cleanup_gref_table(sgt_info);
 
 			/* unmap dmabuf */
-			dma_buf_unmap_attachment(sgt_info->attachment, sgt_info->sgt, DMA_BIDIRECTIONAL);
-			dma_buf_detach(sgt_info->dma_buf, sgt_info->attachment);
+			dma_buf_unmap_attachment(sgt_info->active_attached->attach,
+						 sgt_info->active_sgts->sgt,
+						 DMA_BIDIRECTIONAL);
+			dma_buf_detach(sgt_info->dma_buf, sgt_info->active_attached->attach);
 			dma_buf_put(sgt_info->dma_buf);
 
 			/* TODO: Rest of cleanup, sgt cleanup etc */
@@ -145,16 +149,6 @@ void cmd_process_work(struct work_struct *work)
 	case HYPER_DMABUF_OPS_TO_REMOTE:
 		/* notifying dmabuf map/unmap to importer (probably not needed) */
 		/* for dmabuf synchronization */
-		break;
-
-	/* as importer, command to exporter */
-	case HYPER_DMABUF_OPS_TO_SOURCE:
-		/* notifying dmabuf map/unmap to exporter, map will make the driver to do shadow mapping
-		* or unmapping for synchronization with original exporter (e.g. i915) */
-		/* command : DMABUF_OPS_TO_SOURCE.
-		 * operands0 : hyper_dmabuf_id
-		 * operands1 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
-		 */
 		break;
 
 	default:
@@ -172,6 +166,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 	struct cmd_process *proc;
 	struct hyper_dmabuf_ring_rq *temp_req;
 	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	int ret;
 
 	if (!req) {
 		printk("request is NULL\n");
@@ -216,7 +211,25 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 		return req->command;
 	}
 
-	temp_req = (struct hyper_dmabuf_ring_rq *)kmalloc(sizeof(*temp_req), GFP_KERNEL);
+	/* dma buf remote synchronization */
+	if (req->command == HYPER_DMABUF_OPS_TO_SOURCE) {
+		/* notifying dmabuf map/unmap to exporter, map will make the driver to do shadow mapping
+		 * or unmapping for synchronization with original exporter (e.g. i915) */
+
+		/* command : DMABUF_OPS_TO_SOURCE.
+		 * operands0 : hyper_dmabuf_id
+		 * operands1 : enum hyper_dmabuf_ops {....}
+		 */
+		ret = hyper_dmabuf_remote_sync(req->operands[0], req->operands[1]);
+		if (ret)
+			req->status = HYPER_DMABUF_REQ_ERROR;
+		else
+			req->status = HYPER_DMABUF_REQ_PROCESSED;
+
+		return req->command;
+	}
+
+	temp_req = kmalloc(sizeof(*temp_req), GFP_KERNEL);
 
 	memcpy(temp_req, req, sizeof(*temp_req));
 

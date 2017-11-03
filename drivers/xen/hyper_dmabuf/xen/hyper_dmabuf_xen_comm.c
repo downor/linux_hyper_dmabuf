@@ -3,6 +3,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
+#include <linux/delay.h>
 #include <xen/grant_table.h>
 #include <xen/events.h>
 #include <xen/xenbus.h>
@@ -14,6 +15,8 @@
 #include "../hyper_dmabuf_msg.h"
 
 static int export_req_id = 0;
+
+struct hyper_dmabuf_ring_rq req_pending = {0};
 
 /* Creates entry in xen store that will keep details of all exporter rings created by this domain */
 int32_t hyper_dmabuf_setup_data_dir()
@@ -114,8 +117,8 @@ int hyper_dmabuf_next_req_id_export(void)
 }
 
 /* For now cache latast rings as global variables TODO: keep them in list*/
-static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *dev_id);
-static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *dev_id);
+static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *info);
+static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *info);
 
 /*
  * Callback function that will be called on any change of xenbus path being watched.
@@ -376,12 +379,13 @@ void hyper_dmabuf_cleanup_ringbufs(void)
 	hyper_dmabuf_foreach_importer_ring(hyper_dmabuf_importer_ringbuf_cleanup);
 }
 
-int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req)
+int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req, int wait)
 {
 	struct hyper_dmabuf_front_ring *ring;
 	struct hyper_dmabuf_ring_rq *new_req;
 	struct hyper_dmabuf_ring_info_export *ring_info;
 	int notify;
+	int timeout = 1000;
 
 	/* find a ring info for the channel */
 	ring_info = hyper_dmabuf_find_exporter_ring(domain);
@@ -401,6 +405,10 @@ int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req)
 		return -EIO;
 	}
 
+	/* update req_pending with current request */
+	memcpy(&req_pending, req, sizeof(req_pending));
+
+	/* pass current request to the ring */
 	memcpy(new_req, req, sizeof(*new_req));
 
 	ring->req_prod_pvt++;
@@ -410,10 +418,24 @@ int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req)
 		notify_remote_via_irq(ring_info->irq);
 	}
 
+	if (wait) {
+		while (timeout--) {
+			if (req_pending.status !=
+			    HYPER_DMABUF_REQ_NOT_RESPONDED)
+				break;
+			usleep_range(100, 120);
+		}
+
+		if (timeout < 0) {
+			printk("request timed-out\n");
+			return -EBUSY;
+		}
+	}
+
 	return 0;
 }
 
-/* ISR for request from exporter (as an importer) */
+/* ISR for handling request */
 static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *info)
 {
 	RING_IDX rc, rp;
@@ -444,6 +466,9 @@ static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *info)
 			ret = hyper_dmabuf_msg_parse(ring_info->sdomain, &req);
 
 			if (ret > 0) {
+				/* preparing a response for the request and send it to
+				 * the requester
+				 */
 				memcpy(&resp, &req, sizeof(resp));
 				memcpy(RING_GET_RESPONSE(ring, ring->rsp_prod_pvt), &resp,
 							sizeof(resp));
@@ -465,7 +490,7 @@ static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *info)
 	return IRQ_HANDLED;
 }
 
-/* ISR for responses from importer */
+/* ISR for handling responses */
 static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *info)
 {
 	/* front ring only care about response from back */
@@ -483,10 +508,13 @@ static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *info)
 		more_to_do = 0;
 		rp = ring->sring->rsp_prod;
 		for (i = ring->rsp_cons; i != rp; i++) {
-			unsigned long id;
-
 			resp = RING_GET_RESPONSE(ring, i);
-			id = resp->response_id;
+
+			/* update pending request's status with what is
+			 * in the response
+			 */
+			if (req_pending.request_id == resp->response_id)
+				req_pending.status = resp->status;
 
 			if (resp->status == HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP) {
 				/* parsing response */
@@ -496,6 +524,14 @@ static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *info)
 				if (ret < 0) {
 					printk("getting error while parsing response\n");
 				}
+			} else if (resp->status == HYPER_DMABUF_REQ_PROCESSED) {
+				/* for debugging dma_buf remote synchronization */
+				printk("original request = 0x%x\n", resp->command);
+				printk("Just got HYPER_DMABUF_REQ_PROCESSED\n");
+			} else if (resp->status == HYPER_DMABUF_REQ_ERROR) {
+				/* for debugging dma_buf remote synchronization */
+				printk("original request = 0x%x\n", resp->command);
+				printk("Just got HYPER_DMABUF_REQ_ERROR\n");
 			}
 		}
 
