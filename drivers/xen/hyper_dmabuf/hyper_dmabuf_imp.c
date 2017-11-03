@@ -39,7 +39,7 @@ static int hyper_dmabuf_get_num_pgs(struct sg_table *sgt)
 struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 {
 	struct hyper_dmabuf_pages_info *pinfo;
-	int i, j;
+	int i, j, k;
 	int length;
 	struct scatterlist *sgl;
 
@@ -57,7 +57,7 @@ struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 	pinfo->frst_ofst = sgl->offset;
 	pinfo->pages[0] = sg_page(sgl);
 	length = sgl->length - PAGE_SIZE + sgl->offset;
-	i=1;
+	i = 1;
 
 	while (length > 0) {
 		pinfo->pages[i] = nth_page(sg_page(sgl), i);
@@ -71,12 +71,12 @@ struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 		pinfo->pages[i++] = sg_page(sgl);
 		length = sgl->length - PAGE_SIZE;
 		pinfo->nents++;
+		k = 1;
 
 		while (length > 0) {
-			pinfo->pages[i] = nth_page(sg_page(sgl), i);
+			pinfo->pages[i++] = nth_page(sg_page(sgl), k++);
 			length -= PAGE_SIZE;
 			pinfo->nents++;
-			i++;
 		}
 	}
 
@@ -535,7 +535,8 @@ static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf, struct device* dev,
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
-	return ret;
+	/* Ignoring ret for now */
+	return 0;
 }
 
 static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf, struct dma_buf_attachment *attach)
