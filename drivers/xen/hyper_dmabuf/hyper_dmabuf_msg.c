@@ -12,6 +12,8 @@
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
 
+#define FORCED_UNEXPORTING 0
+
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 struct cmd_process {
@@ -45,7 +47,7 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 			request->operands[i] = operands[i];
 		break;
 
-	case HYPER_DMABUF_DESTROY:
+	case HYPER_DMABUF_NOTIFY_UNEXPORT:
 		/* destroy sg_list for hyper_dmabuf_id on remote side */
 		/* command : DMABUF_DESTROY,
 		 * operands0 : hyper_dmabuf_id
@@ -83,7 +85,7 @@ void cmd_process_work(struct work_struct *work)
 	struct cmd_process *proc = container_of(work, struct cmd_process, work);
 	struct hyper_dmabuf_ring_rq *req;
 	int domid;
-	int i;
+	int i, ret;
 
 	req = proc->rq;
 	domid = proc->domid;
@@ -99,7 +101,7 @@ void cmd_process_work(struct work_struct *work)
 		 * operands4 : top-level reference number for shared pages
 		 * operands5~8 : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
-		imported_sgt_info = (struct hyper_dmabuf_imported_sgt_info*)kcalloc(1, sizeof(*imported_sgt_info), GFP_KERNEL);
+		imported_sgt_info = kcalloc(1, sizeof(*imported_sgt_info), GFP_KERNEL);
 		imported_sgt_info->hyper_dmabuf_id = req->operands[0];
 		imported_sgt_info->frst_ofst = req->operands[2];
 		imported_sgt_info->last_len = req->operands[3];
@@ -119,7 +121,7 @@ void cmd_process_work(struct work_struct *work)
 		hyper_dmabuf_register_imported(imported_sgt_info);
 		break;
 
-	case HYPER_DMABUF_DESTROY_FINISH:
+	case HYPER_DMABUF_UNEXPORT_FINISH:
 		/* destroy sg_list for hyper_dmabuf_id on local side */
 		/* command : DMABUF_DESTROY_FINISH,
 		 * operands0 : hyper_dmabuf_id
@@ -128,21 +130,16 @@ void cmd_process_work(struct work_struct *work)
 		/* TODO: that should be done on workqueue, when received ack from
 		 * all importers that buffer is no longer used
 		 */
-		sgt_info =
-			hyper_dmabuf_find_exported(req->operands[0]);
+		sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
+		hyper_dmabuf_remove_exported(req->operands[0]);
+		if (!sgt_info)
+			printk("sgt_info does not exist in the list\n");
 
-		if (sgt_info) {
-			hyper_dmabuf_cleanup_gref_table(sgt_info);
-
-			/* unmap dmabuf */
-			dma_buf_unmap_attachment(sgt_info->active_attached->attach,
-						 sgt_info->active_sgts->sgt,
-						 DMA_BIDIRECTIONAL);
-			dma_buf_detach(sgt_info->dma_buf, sgt_info->active_attached->attach);
-			dma_buf_put(sgt_info->dma_buf);
-
-			/* TODO: Rest of cleanup, sgt cleanup etc */
-		}
+		ret = hyper_dmabuf_cleanup_sgt_info(sgt_info, FORCED_UNEXPORTING);
+		if (!ret)
+			kfree(sgt_info);
+		else
+			printk("failed to clean up sgt_info\n");
 
 		break;
 
@@ -184,30 +181,30 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 	/* HYPER_DMABUF_DESTROY requires immediate
 	 * follow up so can't be processed in workqueue
 	 */
-	if (req->command == HYPER_DMABUF_DESTROY) {
+	if (req->command == HYPER_DMABUF_NOTIFY_UNEXPORT) {
 		/* destroy sg_list for hyper_dmabuf_id on remote side */
-		/* command : DMABUF_DESTROY,
+		/* command : HYPER_DMABUF_NOTIFY_UNEXPORT,
 		 * operands0 : hyper_dmabuf_id
 		 */
+
 		imported_sgt_info =
 			hyper_dmabuf_find_imported(req->operands[0]);
 
 		if (imported_sgt_info) {
-			hyper_dmabuf_cleanup_imported_pages(imported_sgt_info);
+			hyper_dmabuf_free_sgt(imported_sgt_info->sgt);
 
+			hyper_dmabuf_cleanup_imported_pages(imported_sgt_info);
 			hyper_dmabuf_remove_imported(req->operands[0]);
 
-			/* TODO: cleanup sgt on importer side etc */
+			/* Notify exporter that buffer is freed and it can
+			 * cleanup it
+			 */
+			req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
+			req->command = HYPER_DMABUF_UNEXPORT_FINISH;
+		} else {
+			req->status = HYPER_DMABUF_REQ_ERROR;
 		}
 
-		/* Notify exporter that buffer is freed and it can cleanup it */
-		req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
-		req->command = HYPER_DMABUF_DESTROY_FINISH;
-
-#if 0 /* function is not implemented yet */
-
-		ret = hyper_dmabuf_destroy_sgt(req->hyper_dmabuf_id);
-#endif
 		return req->command;
 	}
 
@@ -233,8 +230,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 
 	memcpy(temp_req, req, sizeof(*temp_req));
 
-	proc = (struct cmd_process *) kcalloc(1, sizeof(struct cmd_process),
-						GFP_KERNEL);
+	proc = kcalloc(1, sizeof(struct cmd_process), GFP_KERNEL);
 
 	proc->rq = temp_req;
 	proc->domid = domid;

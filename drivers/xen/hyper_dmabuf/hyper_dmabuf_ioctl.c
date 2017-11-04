@@ -20,7 +20,7 @@ extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 static uint32_t hyper_dmabuf_id_gen(void) {
 	/* TODO: add proper implementation */
-	static uint32_t id = 0;
+	static uint32_t id = 1000;
 	static int32_t domid = -1;
 	if (domid == -1) {
 		domid = hyper_dmabuf_get_domid();
@@ -259,12 +259,12 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	return ret;
 }
 
-/* removing dmabuf from the database and send int req to the source domain
+/* unexport dmabuf from the database and send int req to the source domain
  * to unmap it.
  */
-static int hyper_dmabuf_destroy(void *data)
+static int hyper_dmabuf_unexport(void *data)
 {
-	struct ioctl_hyper_dmabuf_destroy *destroy_attr;
+	struct ioctl_hyper_dmabuf_unexport *unexport_attr;
 	struct hyper_dmabuf_sgt_info *sgt_info;
 	struct hyper_dmabuf_ring_rq *req;
 	int ret;
@@ -274,20 +274,20 @@ static int hyper_dmabuf_destroy(void *data)
 		return -EINVAL;
 	}
 
-	destroy_attr = (struct ioctl_hyper_dmabuf_destroy *)data;
+	unexport_attr = (struct ioctl_hyper_dmabuf_unexport *)data;
 
 	/* find dmabuf in export list */
-	sgt_info = hyper_dmabuf_find_exported(destroy_attr->hyper_dmabuf_id);
+	sgt_info = hyper_dmabuf_find_exported(unexport_attr->hyper_dmabuf_id);
 
 	/* failed to find corresponding entry in export list */
 	if (sgt_info == NULL) {
-		destroy_attr->status = -EINVAL;
+		unexport_attr->status = -EINVAL;
 		return -EFAULT;
 	}
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_DESTROY, &destroy_attr->hyper_dmabuf_id);
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &unexport_attr->hyper_dmabuf_id);
 
 	/* now send destroy request to remote domain
 	 * currently assuming there's only one importer exist
@@ -300,7 +300,7 @@ static int hyper_dmabuf_destroy(void *data)
 
 	/* free msg */
 	kfree(req);
-	destroy_attr->status = ret;
+	unexport_attr->status = ret;
 
 	/* Rest of cleanup will follow when importer will free it's buffer,
 	 * current implementation assumes that there is only one importer
@@ -386,7 +386,7 @@ static const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_IMPORTER_RING_SETUP, hyper_dmabuf_importer_ring_setup, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_REMOTE, hyper_dmabuf_export_remote, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_FD, hyper_dmabuf_export_fd_ioctl, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_DESTROY, hyper_dmabuf_destroy, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_UNEXPORT, hyper_dmabuf_unexport, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY, hyper_dmabuf_query, 0),
 };
 

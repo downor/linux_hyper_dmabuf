@@ -104,7 +104,7 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 
 	ret = sg_alloc_table(sgt, nents, GFP_KERNEL);
 	if (ret) {
-		kfree(sgt);
+		sg_free_table(sgt);
 		return NULL;
 	}
 
@@ -123,6 +123,12 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 	}
 
 	return sgt;
+}
+
+/* free sg_table */
+void hyper_dmabuf_free_sgt(struct sg_table* sgt)
+{
+	sg_free_table(sgt);
 }
 
 /*
@@ -510,6 +516,92 @@ struct sg_table* hyper_dmabuf_map_pages(grant_ref_t top_level_gref, int frst_ofs
 	kfree(ops);
 
 	return st;
+}
+
+int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int force)
+{
+	struct sgt_list *sgtl;
+	struct attachment_list *attachl;
+	struct kmap_vaddr_list *va_kmapl;
+	struct vmap_vaddr_list *va_vmapl;
+
+	if (!sgt_info) {
+		printk("invalid hyper_dmabuf_id\n");
+		return -EINVAL;
+	}
+
+	/* if force != 1, sgt_info can be released only if
+	 * there's no activity on exported dma-buf on importer
+	 * side.
+	 */
+	if (!force &&
+	    (!list_empty(&sgt_info->va_kmapped->list) ||
+	    !list_empty(&sgt_info->va_vmapped->list) ||
+	    !list_empty(&sgt_info->active_sgts->list) ||
+	    !list_empty(&sgt_info->active_attached->list))) {
+		printk("dma-buf is used by importer\n");
+		return -EPERM;
+	}
+
+	while (!list_empty(&sgt_info->va_kmapped->list)) {
+		va_kmapl = list_first_entry(&sgt_info->va_kmapped->list,
+					    struct kmap_vaddr_list, list);
+
+		dma_buf_kunmap(sgt_info->dma_buf, 1, va_kmapl->vaddr);
+		list_del(&va_kmapl->list);
+		kfree(va_kmapl);
+	}
+
+	while (!list_empty(&sgt_info->va_vmapped->list)) {
+		va_vmapl = list_first_entry(&sgt_info->va_vmapped->list,
+					    struct vmap_vaddr_list, list);
+
+		dma_buf_vunmap(sgt_info->dma_buf, va_vmapl->vaddr);
+		list_del(&va_vmapl->list);
+		kfree(va_vmapl);
+	}
+
+	while (!list_empty(&sgt_info->active_sgts->list)) {
+		attachl = list_first_entry(&sgt_info->active_attached->list,
+					   struct attachment_list, list);
+
+		sgtl = list_first_entry(&sgt_info->active_sgts->list,
+					struct sgt_list, list);
+
+		dma_buf_unmap_attachment(attachl->attach, sgtl->sgt,
+					 DMA_BIDIRECTIONAL);
+		list_del(&sgtl->list);
+		kfree(sgtl);
+	}
+
+	while (!list_empty(&sgt_info->active_sgts->list)) {
+		attachl = list_first_entry(&sgt_info->active_attached->list,
+					   struct attachment_list, list);
+
+		dma_buf_detach(sgt_info->dma_buf, attachl->attach);
+		list_del(&attachl->list);
+		kfree(attachl);
+	}
+
+	/* unmap dma-buf */
+	dma_buf_unmap_attachment(sgt_info->active_attached->attach,
+				 sgt_info->active_sgts->sgt,
+				 DMA_BIDIRECTIONAL);
+
+	/* detatch dma-buf */
+	dma_buf_detach(sgt_info->dma_buf, sgt_info->active_attached->attach);
+
+	/* close connection to dma-buf completely */
+	dma_buf_put(sgt_info->dma_buf);
+
+	hyper_dmabuf_cleanup_gref_table(sgt_info);
+
+	kfree(sgt_info->active_sgts);
+	kfree(sgt_info->active_attached);
+	kfree(sgt_info->va_kmapped);
+	kfree(sgt_info->va_vmapped);
+
+	return 0;
 }
 
 inline int hyper_dmabuf_sync_request_and_wait(int id, int ops)

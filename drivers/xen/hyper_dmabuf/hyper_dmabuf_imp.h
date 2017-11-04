@@ -24,6 +24,10 @@ grant_ref_t *hyper_dmabuf_map_gref_table(grant_ref_t *gref_table, int n_pages_ta
 struct sg_table* hyper_dmabuf_map_pages(grant_ref_t gref, int frst_ofst, int last_len, int nents, int sdomain,
 					struct hyper_dmabuf_shared_pages_info *shared_pages_info);
 
+int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int force);
+
+void hyper_dmabuf_free_sgt(struct sg_table *sgt);
+
 int hyper_dmabuf_export_fd(struct hyper_dmabuf_imported_sgt_info *dinfo, int flags);
 
 struct dma_buf* hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_info *dinfo);
