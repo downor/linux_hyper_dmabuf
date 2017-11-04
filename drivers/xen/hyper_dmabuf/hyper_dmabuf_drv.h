@@ -65,11 +65,11 @@ struct ioctl_hyper_dmabuf_export_fd {
 	uint32_t fd;
 };
 
-#define IOCTL_HYPER_DMABUF_DESTROY \
-_IOC(_IOC_NONE, 'G', 4, sizeof(struct ioctl_hyper_dmabuf_destroy))
-struct ioctl_hyper_dmabuf_destroy {
+#define IOCTL_HYPER_DMABUF_UNEXPORT \
+_IOC(_IOC_NONE, 'G', 4, sizeof(struct ioctl_hyper_dmabuf_unexport))
+struct ioctl_hyper_dmabuf_unexport {
 	/* IN parameters */
-	/* hyper dmabuf id to be destroyed */
+	/* hyper dmabuf id to be unexported */
 	uint32_t hyper_dmabuf_id;
 	/* OUT parameters */
 	/* Status of request */
