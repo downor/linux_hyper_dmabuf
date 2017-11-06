@@ -6,10 +6,10 @@
 /* Importer combine source domain id with given hyper_dmabuf_id
  * to make it unique in case there are multiple exporters */
 
-#define HYPER_DMABUF_ID_IMPORTER(sdomain, id) \
-	((((sdomain) & 0xFF) << 24) | ((id) & 0xFFFFFF))
+#define HYPER_DMABUF_ID_IMPORTER(domid, id) \
+	((((domid) & 0xFF) << 24) | ((id) & 0xFFFFFF))
 
-#define HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(id) \
+#define HYPER_DMABUF_DOM_ID(id) \
 	(((id) >> 24) & 0xFF)
 
 /* each grant_ref_t is 4 bytes, so total 4096 grant_ref_t can be
@@ -17,11 +17,6 @@
  * (needs to be increased for large buffer use-cases such as 4K
  * frame buffer) */
 #define MAX_ALLOWED_NUM_PAGES_FOR_GREF_NUM_ARRAYS 4
-
-enum hyper_dmabuf_sgt_flags {
-        HYPER_DMABUF_SGT_INVALID = 0x10,
-        HYPER_DMABUF_SGT_UNEXPORTED,
-};
 
 /* stack of mapped sgts */
 struct sgt_list {
@@ -77,11 +72,13 @@ struct hyper_dmabuf_sgt_info {
 	int hyper_dmabuf_rdomain; /* domain importing this sgt */
 
 	struct dma_buf *dma_buf; /* needed to store this for freeing it later */
+	int nents; /* number of pages, which may be different than sgt->nents */
 	struct sgt_list *active_sgts;
 	struct attachment_list *active_attached;
 	struct kmap_vaddr_list *va_kmapped;
 	struct vmap_vaddr_list *va_vmapped;
-	int flags;
+	bool valid;
+	bool importer_exported; /* exported locally on importer's side */
 	struct hyper_dmabuf_shared_pages_info shared_pages_info;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
@@ -95,10 +92,10 @@ struct hyper_dmabuf_imported_sgt_info {
 	int last_len;	/* length of data in the last shared page */
 	int nents;	/* number of pages to be shared */
 	grant_ref_t gref; /* reference number of top level addressing page of shared pages */
+	struct dma_buf *dma_buf;
 	struct sg_table *sgt; /* sgt pointer after importing buffer */
 	struct hyper_dmabuf_shared_pages_info shared_pages_info;
-	int flags;
-	int ref_count;
+	bool valid;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
 

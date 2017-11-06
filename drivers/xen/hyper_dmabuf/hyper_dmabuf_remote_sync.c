@@ -114,18 +114,22 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		kfree(sgtl);
 		break;
 
-	case HYPER_DMABUF_OPS_RELEASE:
+	case HYPER_DMABUF_OPS_RELEASE_FINAL:
 		/*
 		 * Importer just released buffer fd, check if there is any other importer still using it.
 		 * If not and buffer was unexported, clean up shared data and remove that buffer.
 		 */
-		 if (list_empty(&sgt_info->active_sgts->list) &&                                                                  	    list_empty(&sgt_info->active_attached->list) &&
-		     sgt_info->flags == HYPER_DMABUF_SGT_UNEXPORTED) {
+		 if (list_empty(&sgt_info->active_attached->list) &&
+		     !sgt_info->valid) {
 			hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
 			hyper_dmabuf_remove_exported(id);
 			kfree(sgt_info);
 		}
 
+		break;
+
+	case HYPER_DMABUF_OPS_RELEASE:
+		/* place holder */
 		break;
 
 	case HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS:

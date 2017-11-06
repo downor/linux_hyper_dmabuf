@@ -107,10 +107,12 @@ static int hyper_dmabuf_export_remote(void *data)
 	}
 
 	/* we check if this specific attachment was already exported
-	 * to the same domain and if yes, it returns hyper_dmabuf_id
-	 * of pre-exported sgt */
-	ret = hyper_dmabuf_find_id(dma_buf, export_remote_attr->remote_domain);
-	if (ret != -1) {
+	 * to the same domain and if yes and it's valid sgt_info,
+	 * it returns hyper_dmabuf_id of pre-exported sgt_info
+	 */
+	ret = hyper_dmabuf_find_id_exported(dma_buf, export_remote_attr->remote_domain);
+	sgt_info = hyper_dmabuf_find_exported(ret);
+	if (ret != -1 && sgt_info->valid) {
 		dma_buf_put(dma_buf);
 		export_remote_attr->hyper_dmabuf_id = ret;
 		return 0;
@@ -135,12 +137,13 @@ static int hyper_dmabuf_export_remote(void *data)
 	/* TODO: We might need to consider using port number on event channel? */
 	sgt_info->hyper_dmabuf_rdomain = export_remote_attr->remote_domain;
 	sgt_info->dma_buf = dma_buf;
-	sgt_info->flags = 0;
+	sgt_info->valid = 1;
+	sgt_info->importer_exported = 0;
 
-	sgt_info->active_sgts = kcalloc(1, sizeof(struct sgt_list), GFP_KERNEL);
-	sgt_info->active_attached = kcalloc(1, sizeof(struct attachment_list), GFP_KERNEL);
-	sgt_info->va_kmapped = kcalloc(1, sizeof(struct kmap_vaddr_list), GFP_KERNEL);
-	sgt_info->va_vmapped = kcalloc(1, sizeof(struct vmap_vaddr_list), GFP_KERNEL);
+	sgt_info->active_sgts = kmalloc(sizeof(struct sgt_list), GFP_KERNEL);
+	sgt_info->active_attached = kmalloc(sizeof(struct attachment_list), GFP_KERNEL);
+	sgt_info->va_kmapped = kmalloc(sizeof(struct kmap_vaddr_list), GFP_KERNEL);
+	sgt_info->va_vmapped = kmalloc(sizeof(struct vmap_vaddr_list), GFP_KERNEL);
 
 	sgt_info->active_sgts->sgt = sgt;
 	sgt_info->active_attached->attach = attachment;
@@ -158,6 +161,8 @@ static int hyper_dmabuf_export_remote(void *data)
 	page_info = hyper_dmabuf_ext_pgs(sgt);
 	if (page_info == NULL)
 		goto fail_export;
+
+	sgt_info->nents = page_info->nents;
 
 	/* now register it to export list */
 	hyper_dmabuf_register_exported(sgt_info);
@@ -220,6 +225,8 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 {
 	struct ioctl_hyper_dmabuf_export_fd *export_fd_attr;
 	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	struct hyper_dmabuf_ring_rq *req;
+	int operand;
 	int ret = 0;
 
 	if (!data) {
@@ -234,35 +241,38 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	if (imported_sgt_info == NULL) /* can't find sgt from the table */
 		return -1;
 
-	/*
-	 * Check if buffer was not unexported by exporter.
-	 * In such exporter is waiting for importer to finish using that buffer,
-	 * so do not allow export fd of such buffer anymore.
-	 */
-	if (imported_sgt_info->flags == HYPER_DMABUF_SGT_INVALID) {
-		return -EINVAL;
-	}
-
 	printk("%s Found buffer gref %d  off %d last len %d nents %d domain %d\n", __func__,
 		imported_sgt_info->gref, imported_sgt_info->frst_ofst,
 		imported_sgt_info->last_len, imported_sgt_info->nents,
-		HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(imported_sgt_info->hyper_dmabuf_id));
+		HYPER_DMABUF_DOM_ID(imported_sgt_info->hyper_dmabuf_id));
 
 	if (!imported_sgt_info->sgt) {
 		imported_sgt_info->sgt = hyper_dmabuf_map_pages(imported_sgt_info->gref,
 							imported_sgt_info->frst_ofst,
 							imported_sgt_info->last_len,
 							imported_sgt_info->nents,
-							HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(imported_sgt_info->hyper_dmabuf_id),
+							HYPER_DMABUF_DOM_ID(imported_sgt_info->hyper_dmabuf_id),
 							&imported_sgt_info->shared_pages_info);
-		if (!imported_sgt_info->sgt) {
-			printk("Failed to create sgt\n");
+
+		/* send notifiticatio for first export_fd to exporter */
+		operand = imported_sgt_info->hyper_dmabuf_id;
+		req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+		hyper_dmabuf_create_request(req, HYPER_DMABUF_FIRST_EXPORT, &operand);
+
+		ret = hyper_dmabuf_send_request(HYPER_DMABUF_DOM_ID(operand), req, false);
+
+		if (!imported_sgt_info->sgt || ret) {
+			kfree(req);
+			printk("Failed to create sgt or notify exporter\n");
 			return -EINVAL;
 		}
+		kfree(req);
 	}
 
 	export_fd_attr->fd = hyper_dmabuf_export_fd(imported_sgt_info, export_fd_attr->flags);
-	if (export_fd_attr < 0) {
+
+	if (export_fd_attr->fd < 0) {
+		/* fail to get fd */
 		ret = export_fd_attr->fd;
 	}
 
@@ -309,22 +319,22 @@ static int hyper_dmabuf_unexport(void *data)
 	/* free msg */
 	kfree(req);
 
+	/* no longer valid */
+	sgt_info->valid = 0;
+
 	/*
-	 * Check if any importer is still using buffer, if not clean it up completly,
-	 * otherwise mark buffer as unexported and postpone its cleanup to time when
-	 * importer will finish using it.
+	 * Immediately clean-up if it has never been exported by importer
+	 * (so no SGT is constructed on importer).
+	 * clean it up later in remote sync when final release ops
+	 * is called (importer does this only when there's no
+	 * no consumer of locally exported FDs)
 	 */
-	if (list_empty(&sgt_info->active_sgts->list) &&
-	    list_empty(&sgt_info->active_attached->list)) {
+	printk("before claning up buffer completly\n");
+	if (!sgt_info->importer_exported) {
 		hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
 		hyper_dmabuf_remove_exported(unexport_attr->hyper_dmabuf_id);
 		kfree(sgt_info);
-	} else {
-		sgt_info->flags = HYPER_DMABUF_SGT_UNEXPORTED;
 	}
-
-	/* TODO: should we mark here that buffer was destroyed immiedetaly or that was postponed ? */
-	unexport_attr->status = ret;
 
 	return ret;
 }
@@ -369,7 +379,7 @@ static int hyper_dmabuf_query(void *data)
 			if (sgt_info) {
 				query_attr->info = 0xFFFFFFFF; /* myself */
 			} else {
-				query_attr->info = (HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(imported_sgt_info->hyper_dmabuf_id));
+				query_attr->info = (HYPER_DMABUF_DOM_ID(imported_sgt_info->hyper_dmabuf_id));
 			}
 			break;
 

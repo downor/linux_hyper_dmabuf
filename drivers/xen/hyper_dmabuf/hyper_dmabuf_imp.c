@@ -13,6 +13,14 @@
 
 #define REFS_PER_PAGE (PAGE_SIZE/sizeof(grant_ref_t))
 
+int dmabuf_refcount(struct dma_buf *dma_buf)
+{
+	if ((dma_buf != NULL) && (dma_buf->file != NULL))
+		return file_count(dma_buf->file);
+
+	return -1;
+}
+
 /* return total number of pages referecned by a sgt
  * for pre-calculation of # of pages behind a given sgt
  */
@@ -368,8 +376,8 @@ int hyper_dmabuf_cleanup_gref_table(struct hyper_dmabuf_sgt_info *sgt_info) {
 	struct hyper_dmabuf_shared_pages_info *shared_pages_info = &sgt_info->shared_pages_info;
 
 	grant_ref_t *ref = shared_pages_info->top_level_page;
-	int n_2nd_level_pages = (sgt_info->active_sgts->sgt->nents/REFS_PER_PAGE +
-				((sgt_info->active_sgts->sgt->nents % REFS_PER_PAGE) ? 1: 0));
+	int n_2nd_level_pages = (sgt_info->nents/REFS_PER_PAGE +
+				((sgt_info->nents % REFS_PER_PAGE) ? 1: 0));
 
 
 	if (shared_pages_info->data_refs == NULL ||
@@ -388,26 +396,28 @@ int hyper_dmabuf_cleanup_gref_table(struct hyper_dmabuf_sgt_info *sgt_info) {
 		if (!gnttab_end_foreign_access_ref(ref[i], 1)) {
 			printk("refid still in use!!!\n");
 		}
+		gnttab_free_grant_reference(ref[i]);
 		i++;
 	}
 	free_pages((unsigned long)shared_pages_info->addr_pages, i);
+
 
 	/* End foreign access for top level addressing page */
 	if (gnttab_query_foreign_access(shared_pages_info->top_level_ref)) {
 		printk("refid not shared !!\n");
 	}
-	if (!gnttab_end_foreign_access_ref(shared_pages_info->top_level_ref, 1)) {
-		printk("refid still in use!!!\n");
-	}
 	gnttab_end_foreign_access_ref(shared_pages_info->top_level_ref, 1);
+	gnttab_free_grant_reference(shared_pages_info->top_level_ref);
+
 	free_pages((unsigned long)shared_pages_info->top_level_page, 1);
 
 	/* End foreign access for data pages, but do not free them */
-	for (i = 0; i < sgt_info->active_sgts->sgt->nents; i++) {
+	for (i = 0; i < sgt_info->nents; i++) {
 		if (gnttab_query_foreign_access(shared_pages_info->data_refs[i])) {
 			printk("refid not shared !!\n");
 		}
 		gnttab_end_foreign_access_ref(shared_pages_info->data_refs[i], 0);
+		gnttab_free_grant_reference(shared_pages_info->data_refs[i]);
 	}
 
 	kfree(shared_pages_info->data_refs);
@@ -545,6 +555,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 		return -EPERM;
 	}
 
+	/* force == 1 is not recommended */
 	while (!list_empty(&sgt_info->va_kmapped->list)) {
 		va_kmapl = list_first_entry(&sgt_info->va_kmapped->list,
 					    struct kmap_vaddr_list, list);
@@ -598,6 +609,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 
 	/* close connection to dma-buf completely */
 	dma_buf_put(sgt_info->dma_buf);
+	sgt_info->dma_buf = NULL;
 
 	kfree(sgt_info->active_sgts);
 	kfree(sgt_info->active_attached);
@@ -621,7 +633,7 @@ inline int hyper_dmabuf_sync_request_and_wait(int id, int ops)
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_OPS_TO_SOURCE, &operands[0]);
 
 	/* send request and wait for a response */
-	ret = hyper_dmabuf_send_request(HYPER_DMABUF_ID_IMPORTER_GET_SDOMAIN_ID(id), req, true);
+	ret = hyper_dmabuf_send_request(HYPER_DMABUF_DOM_ID(id), req, true);
 
 	kfree(req);
 
@@ -737,30 +749,33 @@ static void hyper_dmabuf_ops_unmap(struct dma_buf_attachment *attachment,
 	}
 }
 
-static void hyper_dmabuf_ops_release(struct dma_buf *dmabuf)
+static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 {
 	struct hyper_dmabuf_imported_sgt_info *sgt_info;
 	int ret;
+	int final_release;
 
-	if (!dmabuf->priv)
+	if (!dma_buf->priv)
 		return;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dma_buf->priv;
 
-	if (sgt_info) {
-		/* dmabuf fd is being released - decrease refcount */
-		sgt_info->ref_count--;
+	final_release = sgt_info && !sgt_info->valid &&
+		       !dmabuf_refcount(sgt_info->dma_buf);
 
-		/* if no one else in that domain is using that buffer, unmap it for now */
-		if (sgt_info->ref_count == 0) {
-			hyper_dmabuf_cleanup_imported_pages(sgt_info);
-			hyper_dmabuf_free_sgt(sgt_info->sgt);
-			sgt_info->sgt = NULL;
-		}
+	if (!dmabuf_refcount(sgt_info->dma_buf)) {
+		sgt_info->dma_buf = NULL;
 	}
 
-	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
-						HYPER_DMABUF_OPS_RELEASE);
+	if (final_release) {
+		hyper_dmabuf_cleanup_imported_pages(sgt_info);
+		hyper_dmabuf_free_sgt(sgt_info->sgt);
+		ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
+							HYPER_DMABUF_OPS_RELEASE_FINAL);
+	} else {
+		ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
+							HYPER_DMABUF_OPS_RELEASE);
+	}
 
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
@@ -770,8 +785,7 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dmabuf)
 	 * Check if buffer is still valid and if not remove it from imported list.
 	 * That has to be done after sending sync request
 	 */
-	if (sgt_info && sgt_info->ref_count == 0 &&
-	    sgt_info->flags == HYPER_DMABUF_SGT_INVALID) {
+	if (final_release) {
 		hyper_dmabuf_remove_imported(sgt_info->hyper_dmabuf_id);
 		kfree(sgt_info);
 	}
@@ -962,23 +976,21 @@ static const struct dma_buf_ops hyper_dmabuf_ops = {
 /* exporting dmabuf as fd */
 int hyper_dmabuf_export_fd(struct hyper_dmabuf_imported_sgt_info *dinfo, int flags)
 {
-	int fd;
-	struct dma_buf* dmabuf;
+	int fd = -1;
 
 	/* call hyper_dmabuf_export_dmabuf and create
 	 * and bind a handle for it then release
 	 */
-	dmabuf = hyper_dmabuf_export_dma_buf(dinfo);
+	hyper_dmabuf_export_dma_buf(dinfo);
 
-	fd = dma_buf_fd(dmabuf, flags);
-
-	/* dmabuf fd is exported for given bufer - increase its ref count */
-	dinfo->ref_count++;
+	if (dinfo->dma_buf) {
+		fd = dma_buf_fd(dinfo->dma_buf, flags);
+	}
 
 	return fd;
 }
 
-struct dma_buf* hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_info *dinfo)
+void hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_info *dinfo)
 {
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
@@ -989,5 +1001,5 @@ struct dma_buf* hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_inf
 	exp_info.flags = /* not sure about flag */0;
 	exp_info.priv = dinfo;
 
-	return dma_buf_export(&exp_info);
+	dinfo->dma_buf = dma_buf_export(&exp_info);
 }

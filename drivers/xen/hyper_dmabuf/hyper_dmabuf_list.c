@@ -65,7 +65,7 @@ struct hyper_dmabuf_sgt_info *hyper_dmabuf_find_exported(int id)
 }
 
 /* search for pre-exported sgt and return id of it if it exist */
-int hyper_dmabuf_find_id(struct dma_buf *dmabuf, int domid)
+int hyper_dmabuf_find_id_exported(struct dma_buf *dmabuf, int domid)
 {
 	struct hyper_dmabuf_info_entry_exported *info_entry;
 	int bkt;

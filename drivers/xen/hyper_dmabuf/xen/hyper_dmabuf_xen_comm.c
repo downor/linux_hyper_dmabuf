@@ -456,13 +456,12 @@ static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *info)
 	do {
 		rc = ring->req_cons;
 		rp = ring->sring->req_prod;
-
+		more_to_do = 0;
 		while (rc != rp) {
 			if (RING_REQUEST_CONS_OVERFLOW(ring, rc))
 				break;
 
 			memcpy(&req, RING_GET_REQUEST(ring, rc), sizeof(req));
-			printk("Got request\n");
 			ring->req_cons = ++rc;
 
 			ret = hyper_dmabuf_msg_parse(ring_info->sdomain, &req);
@@ -479,13 +478,11 @@ static irqreturn_t hyper_dmabuf_back_ring_isr(int irq, void *info)
 				RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
 
 				if (notify) {
-					printk("Notyfing\n");
 					notify_remote_via_irq(ring_info->irq);
 				}
 			}
 
 			RING_FINAL_CHECK_FOR_REQUESTS(ring, more_to_do);
-			printk("Final check for requests %d\n", more_to_do);
 		}
 	} while (more_to_do);
 
@@ -541,7 +538,6 @@ static irqreturn_t hyper_dmabuf_front_ring_isr(int irq, void *info)
 
 		if (i != ring->req_prod_pvt) {
 			RING_FINAL_CHECK_FOR_RESPONSES(ring, more_to_do);
-			printk("more to do %d\n", more_to_do);
 		} else {
 			ring->sring->rsp_event = i+1;
 		}

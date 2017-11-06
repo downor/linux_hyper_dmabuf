@@ -3,6 +3,7 @@
 
 struct hyper_dmabuf_private {
         struct device *device;
+	int domid;
 	struct workqueue_struct *work_queue;
 };
 
