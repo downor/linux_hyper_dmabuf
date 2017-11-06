@@ -18,6 +18,11 @@
  * frame buffer) */
 #define MAX_ALLOWED_NUM_PAGES_FOR_GREF_NUM_ARRAYS 4
 
+enum hyper_dmabuf_sgt_flags {
+        HYPER_DMABUF_SGT_INVALID = 0x10,
+        HYPER_DMABUF_SGT_UNEXPORTED,
+};
+
 /* stack of mapped sgts */
 struct sgt_list {
 	struct sg_table *sgt;
@@ -76,7 +81,7 @@ struct hyper_dmabuf_sgt_info {
 	struct attachment_list *active_attached;
 	struct kmap_vaddr_list *va_kmapped;
 	struct vmap_vaddr_list *va_vmapped;
-
+	int flags;
 	struct hyper_dmabuf_shared_pages_info shared_pages_info;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
@@ -92,6 +97,8 @@ struct hyper_dmabuf_imported_sgt_info {
 	grant_ref_t gref; /* reference number of top level addressing page of shared pages */
 	struct sg_table *sgt; /* sgt pointer after importing buffer */
 	struct hyper_dmabuf_shared_pages_info shared_pages_info;
+	int flags;
+	int ref_count;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
 

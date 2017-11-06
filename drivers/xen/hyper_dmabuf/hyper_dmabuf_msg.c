@@ -81,11 +81,10 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 void cmd_process_work(struct work_struct *work)
 {
 	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
-        struct hyper_dmabuf_sgt_info *sgt_info;
 	struct cmd_process *proc = container_of(work, struct cmd_process, work);
 	struct hyper_dmabuf_ring_rq *req;
 	int domid;
-	int i, ret;
+	int i;
 
 	req = proc->rq;
 	domid = proc->domid;
@@ -118,29 +117,9 @@ void cmd_process_work(struct work_struct *work)
 		for (i=0; i<4; i++)
 			imported_sgt_info->private[i] = req->operands[5+i];
 
+		imported_sgt_info->flags = 0;
+		imported_sgt_info->ref_count = 0;
 		hyper_dmabuf_register_imported(imported_sgt_info);
-		break;
-
-	case HYPER_DMABUF_UNEXPORT_FINISH:
-		/* destroy sg_list for hyper_dmabuf_id on local side */
-		/* command : DMABUF_DESTROY_FINISH,
-		 * operands0 : hyper_dmabuf_id
-		 */
-
-		/* TODO: that should be done on workqueue, when received ack from
-		 * all importers that buffer is no longer used
-		 */
-		sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
-		hyper_dmabuf_remove_exported(req->operands[0]);
-		if (!sgt_info)
-			printk("sgt_info does not exist in the list\n");
-
-		ret = hyper_dmabuf_cleanup_sgt_info(sgt_info, FORCED_UNEXPORTING);
-		if (!ret)
-			kfree(sgt_info);
-		else
-			printk("failed to clean up sgt_info\n");
-
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
@@ -191,16 +170,18 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 			hyper_dmabuf_find_imported(req->operands[0]);
 
 		if (imported_sgt_info) {
-			hyper_dmabuf_free_sgt(imported_sgt_info->sgt);
-
-			hyper_dmabuf_cleanup_imported_pages(imported_sgt_info);
-			hyper_dmabuf_remove_imported(req->operands[0]);
-
-			/* Notify exporter that buffer is freed and it can
-			 * cleanup it
-			 */
-			req->status = HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP;
-			req->command = HYPER_DMABUF_UNEXPORT_FINISH;
+			/* check if buffer is still mapped and in use */
+			if (imported_sgt_info->sgt) {
+				/*
+				 * Buffer is still in  use, just mark that it should
+				 * not be allowed to export its fd anymore.
+				 */
+				imported_sgt_info->flags = HYPER_DMABUF_SGT_INVALID;
+			} else {
+				/* No one is using buffer, remove it from imported list */
+				hyper_dmabuf_remove_imported(req->operands[0]);
+				kfree(imported_sgt_info);
+			}
 		} else {
 			req->status = HYPER_DMABUF_REQ_ERROR;
 		}
