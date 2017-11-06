@@ -25,7 +25,7 @@ int hyper_dmabuf_table_destroy(void);
 int hyper_dmabuf_register_exported(struct hyper_dmabuf_sgt_info *info);
 
 /* search for pre-exported sgt and return id of it if it exist */
-int hyper_dmabuf_find_id(struct dma_buf *dmabuf, int domid);
+int hyper_dmabuf_find_id_exported(struct dma_buf *dmabuf, int domid);
 
 int hyper_dmabuf_register_imported(struct hyper_dmabuf_imported_sgt_info* info);
 

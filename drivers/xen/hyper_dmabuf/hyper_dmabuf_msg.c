@@ -55,6 +55,14 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 		request->operands[0] = operands[0];
 		break;
 
+	case HYPER_DMABUF_FIRST_EXPORT:
+		/* dmabuf fd is being created on imported side for first time */
+		/* command : HYPER_DMABUF_FIRST_EXPORT,
+		 * operands0 : hyper_dmabuf_id
+		 */
+		request->operands[0] = operands[0];
+		break;
+
 	case HYPER_DMABUF_OPS_TO_REMOTE:
 		/* notifying dmabuf map/unmap to importer (probably not needed) */
 		/* for dmabuf synchronization */
@@ -81,6 +89,7 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 void cmd_process_work(struct work_struct *work)
 {
 	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	struct hyper_dmabuf_sgt_info *sgt_info;
 	struct cmd_process *proc = container_of(work, struct cmd_process, work);
 	struct hyper_dmabuf_ring_rq *req;
 	int domid;
@@ -117,9 +126,23 @@ void cmd_process_work(struct work_struct *work)
 		for (i=0; i<4; i++)
 			imported_sgt_info->private[i] = req->operands[5+i];
 
-		imported_sgt_info->flags = 0;
-		imported_sgt_info->ref_count = 0;
+		imported_sgt_info->valid = 1;
 		hyper_dmabuf_register_imported(imported_sgt_info);
+		break;
+
+	case HYPER_DMABUF_FIRST_EXPORT:
+		/* find a corresponding SGT for the id */
+		sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
+
+		if (!sgt_info) {
+			printk("critical err: requested sgt_info can't be found %d\n", req->operands[0]);
+			break;
+		}
+
+		if (sgt_info->importer_exported)
+			printk("warning: exported flag is not supposed to be 1 already\n");
+
+		sgt_info->importer_exported = 1;
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
@@ -170,13 +193,14 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 			hyper_dmabuf_find_imported(req->operands[0]);
 
 		if (imported_sgt_info) {
-			/* check if buffer is still mapped and in use */
-			if (imported_sgt_info->sgt) {
+			/* if anything is still using dma_buf */
+			if (imported_sgt_info->dma_buf &&
+			    dmabuf_refcount(imported_sgt_info->dma_buf) > 0) {
 				/*
 				 * Buffer is still in  use, just mark that it should
 				 * not be allowed to export its fd anymore.
 				 */
-				imported_sgt_info->flags = HYPER_DMABUF_SGT_INVALID;
+				imported_sgt_info->valid = 0;
 			} else {
 				/* No one is using buffer, remove it from imported list */
 				hyper_dmabuf_remove_imported(req->operands[0]);

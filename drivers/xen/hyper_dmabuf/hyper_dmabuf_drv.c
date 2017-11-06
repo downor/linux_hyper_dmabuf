@@ -33,6 +33,7 @@ static int hyper_dmabuf_drv_init(void)
 	/* device structure initialization */
 	/* currently only does work-queue initialization */
 	hyper_dmabuf_private.work_queue = create_workqueue("hyper_dmabuf_wqueue");
+	hyper_dmabuf_private.domid = hyper_dmabuf_get_domid();
 
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {

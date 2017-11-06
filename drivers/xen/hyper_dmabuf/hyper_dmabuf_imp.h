@@ -1,6 +1,7 @@
 #ifndef __HYPER_DMABUF_IMP_H__
 #define __HYPER_DMABUF_IMP_H__
 
+#include <linux/fs.h>
 #include "hyper_dmabuf_struct.h"
 
 /* extract pages directly from struct sg_table */
@@ -30,6 +31,8 @@ void hyper_dmabuf_free_sgt(struct sg_table *sgt);
 
 int hyper_dmabuf_export_fd(struct hyper_dmabuf_imported_sgt_info *dinfo, int flags);
 
-struct dma_buf* hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_info *dinfo);
+void hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_info *dinfo);
+
+int dmabuf_refcount(struct dma_buf *dma_buf);
 
 #endif /* __HYPER_DMABUF_IMP_H__ */
