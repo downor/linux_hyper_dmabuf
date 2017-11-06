@@ -9,6 +9,7 @@
 #include "hyper_dmabuf_imp.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
+#include "hyper_dmabuf_list.h"
 
 #define REFS_PER_PAGE (PAGE_SIZE/sizeof(grant_ref_t))
 
@@ -104,7 +105,7 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 
 	ret = sg_alloc_table(sgt, nents, GFP_KERNEL);
 	if (ret) {
-		sg_free_table(sgt);
+		hyper_dmabuf_free_sgt(sgt);
 		return NULL;
 	}
 
@@ -129,6 +130,7 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 void hyper_dmabuf_free_sgt(struct sg_table* sgt)
 {
 	sg_free_table(sgt);
+	kfree(sgt);
 }
 
 /*
@@ -583,6 +585,9 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 		kfree(attachl);
 	}
 
+	/* Start cleanup of buffer in reverse order to exporting */
+	hyper_dmabuf_cleanup_gref_table(sgt_info);
+
 	/* unmap dma-buf */
 	dma_buf_unmap_attachment(sgt_info->active_attached->attach,
 				 sgt_info->active_sgts->sgt,
@@ -593,8 +598,6 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 
 	/* close connection to dma-buf completely */
 	dma_buf_put(sgt_info->dma_buf);
-
-	hyper_dmabuf_cleanup_gref_table(sgt_info);
 
 	kfree(sgt_info->active_sgts);
 	kfree(sgt_info->active_attached);
@@ -694,6 +697,9 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_MAP);
 
+	kfree(page_info->pages);
+	kfree(page_info);
+
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
@@ -741,11 +747,33 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dmabuf)
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
 
+	if (sgt_info) {
+		/* dmabuf fd is being released - decrease refcount */
+		sgt_info->ref_count--;
+
+		/* if no one else in that domain is using that buffer, unmap it for now */
+		if (sgt_info->ref_count == 0) {
+			hyper_dmabuf_cleanup_imported_pages(sgt_info);
+			hyper_dmabuf_free_sgt(sgt_info->sgt);
+			sgt_info->sgt = NULL;
+		}
+	}
+
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_RELEASE);
 
 	if (ret < 0) {
 		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+	}
+
+	/*
+	 * Check if buffer is still valid and if not remove it from imported list.
+	 * That has to be done after sending sync request
+	 */
+	if (sgt_info && sgt_info->ref_count == 0 &&
+	    sgt_info->flags == HYPER_DMABUF_SGT_INVALID) {
+		hyper_dmabuf_remove_imported(sgt_info->hyper_dmabuf_id);
+		kfree(sgt_info);
 	}
 }
 
@@ -943,6 +971,9 @@ int hyper_dmabuf_export_fd(struct hyper_dmabuf_imported_sgt_info *dinfo, int fla
 	dmabuf = hyper_dmabuf_export_dma_buf(dinfo);
 
 	fd = dma_buf_fd(dmabuf, flags);
+
+	/* dmabuf fd is exported for given bufer - increase its ref count */
+	dinfo->ref_count++;
 
 	return fd;
 }

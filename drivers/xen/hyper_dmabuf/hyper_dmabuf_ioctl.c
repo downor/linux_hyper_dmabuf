@@ -135,6 +135,7 @@ static int hyper_dmabuf_export_remote(void *data)
 	/* TODO: We might need to consider using port number on event channel? */
 	sgt_info->hyper_dmabuf_rdomain = export_remote_attr->remote_domain;
 	sgt_info->dma_buf = dma_buf;
+	sgt_info->flags = 0;
 
 	sgt_info->active_sgts = kcalloc(1, sizeof(struct sgt_list), GFP_KERNEL);
 	sgt_info->active_attached = kcalloc(1, sizeof(struct attachment_list), GFP_KERNEL);
@@ -233,6 +234,15 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	if (imported_sgt_info == NULL) /* can't find sgt from the table */
 		return -1;
 
+	/*
+	 * Check if buffer was not unexported by exporter.
+	 * In such exporter is waiting for importer to finish using that buffer,
+	 * so do not allow export fd of such buffer anymore.
+	 */
+	if (imported_sgt_info->flags == HYPER_DMABUF_SGT_INVALID) {
+		return -EINVAL;
+	}
+
 	printk("%s Found buffer gref %d  off %d last len %d nents %d domain %d\n", __func__,
 		imported_sgt_info->gref, imported_sgt_info->frst_ofst,
 		imported_sgt_info->last_len, imported_sgt_info->nents,
@@ -289,9 +299,7 @@ static int hyper_dmabuf_unexport(void *data)
 
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &unexport_attr->hyper_dmabuf_id);
 
-	/* now send destroy request to remote domain
-	 * currently assuming there's only one importer exist
-	 */
+	/* Now send unexport request to remote domain, marking that buffer should not be used anymore */
 	ret = hyper_dmabuf_send_request(sgt_info->hyper_dmabuf_rdomain, req, true);
 	if (ret < 0) {
 		kfree(req);
@@ -300,11 +308,23 @@ static int hyper_dmabuf_unexport(void *data)
 
 	/* free msg */
 	kfree(req);
-	unexport_attr->status = ret;
 
-	/* Rest of cleanup will follow when importer will free it's buffer,
-	 * current implementation assumes that there is only one importer
-         */
+	/*
+	 * Check if any importer is still using buffer, if not clean it up completly,
+	 * otherwise mark buffer as unexported and postpone its cleanup to time when
+	 * importer will finish using it.
+	 */
+	if (list_empty(&sgt_info->active_sgts->list) &&
+	    list_empty(&sgt_info->active_attached->list)) {
+		hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
+		hyper_dmabuf_remove_exported(unexport_attr->hyper_dmabuf_id);
+		kfree(sgt_info);
+	} else {
+		sgt_info->flags = HYPER_DMABUF_SGT_UNEXPORTED;
+	}
+
+	/* TODO: should we mark here that buffer was destroyed immiedetaly or that was postponed ? */
+	unexport_attr->status = ret;
 
 	return ret;
 }

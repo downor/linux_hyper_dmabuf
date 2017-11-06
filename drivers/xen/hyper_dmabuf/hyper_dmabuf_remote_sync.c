@@ -8,6 +8,7 @@
 #include "hyper_dmabuf_drv.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
+#include "hyper_dmabuf_imp.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
@@ -114,10 +115,17 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		break;
 
 	case HYPER_DMABUF_OPS_RELEASE:
-		/* remote importer shouldn't release dma_buf because
-		 * exporter will hold handle to the dma_buf as
-		 * far as dma_buf is shared with other domains.
+		/*
+		 * Importer just released buffer fd, check if there is any other importer still using it.
+		 * If not and buffer was unexported, clean up shared data and remove that buffer.
 		 */
+		 if (list_empty(&sgt_info->active_sgts->list) &&                                                                  	    list_empty(&sgt_info->active_attached->list) &&
+		     sgt_info->flags == HYPER_DMABUF_SGT_UNEXPORTED) {
+			hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
+			hyper_dmabuf_remove_exported(id);
+			kfree(sgt_info);
+		}
+
 		break;
 
 	case HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS:
