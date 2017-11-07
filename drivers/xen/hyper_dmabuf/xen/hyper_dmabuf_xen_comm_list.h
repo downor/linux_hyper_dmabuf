@@ -2,40 +2,38 @@
 #define __HYPER_DMABUF_XEN_COMM_LIST_H__
 
 /* number of bits to be used for exported dmabufs hash table */
-#define MAX_ENTRY_EXPORT_RING 7
+#define MAX_ENTRY_TX_RING 7
 /* number of bits to be used for imported dmabufs hash table */
-#define MAX_ENTRY_IMPORT_RING 7
+#define MAX_ENTRY_RX_RING 7
 
-struct hyper_dmabuf_exporter_ring_info {
-        struct hyper_dmabuf_ring_info_export *info;
+struct xen_comm_tx_ring_info_entry {
+        struct xen_comm_tx_ring_info *info;
         struct hlist_node node;
 };
 
-struct hyper_dmabuf_importer_ring_info {
-        struct hyper_dmabuf_ring_info_import *info;
+struct xen_comm_rx_ring_info_entry {
+        struct xen_comm_rx_ring_info *info;
         struct hlist_node node;
 };
 
-int hyper_dmabuf_ring_table_init(void);
+void xen_comm_ring_table_init(void);
 
-int hyper_dmabuf_ring_table_destroy(void);
+int xen_comm_add_tx_ring(struct xen_comm_tx_ring_info *ring_info);
 
-int hyper_dmabuf_register_exporter_ring(struct hyper_dmabuf_ring_info_export *ring_info);
+int xen_comm_add_rx_ring(struct xen_comm_rx_ring_info *ring_info);
 
-int hyper_dmabuf_register_importer_ring(struct hyper_dmabuf_ring_info_import *ring_info);
+int xen_comm_remove_tx_ring(int domid);
 
-struct hyper_dmabuf_ring_info_export *hyper_dmabuf_find_exporter_ring(int domid);
+int xen_comm_remove_rx_ring(int domid);
 
-struct hyper_dmabuf_ring_info_import *hyper_dmabuf_find_importer_ring(int domid);
+struct xen_comm_tx_ring_info *xen_comm_find_tx_ring(int domid);
 
-int hyper_dmabuf_remove_exporter_ring(int domid);
-
-int hyper_dmabuf_remove_importer_ring(int domid);
+struct xen_comm_rx_ring_info *xen_comm_find_rx_ring(int domid);
 
 /* iterates over all exporter rings and calls provided function for each of them */
-void hyper_dmabuf_foreach_exporter_ring(void (*func)(int rdom));
+void xen_comm_foreach_tx_ring(void (*func)(int domid));
 
 /* iterates over all importer rings and calls provided function for each of them */
-void hyper_dmabuf_foreach_importer_ring(void (*func)(int sdom));
+void xen_comm_foreach_rx_ring(void (*func)(int domid));
 
 #endif // __HYPER_DMABUF_XEN_COMM_LIST_H__

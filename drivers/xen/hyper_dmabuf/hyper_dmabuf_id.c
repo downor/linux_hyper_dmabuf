@@ -1,5 +1,6 @@
 #include <linux/list.h>
 #include <linux/slab.h>
+#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_id.h"
 
@@ -19,6 +20,7 @@ void store_reusable_id(int id)
 static int retrieve_reusable_id(void)
 {
 	struct list_reusable_id *reusable_head = hyper_dmabuf_private.id_queue;
+	int id;
 
 	/* check there is reusable id */
 	if (!list_empty(&reusable_head->list)) {
@@ -27,7 +29,9 @@ static int retrieve_reusable_id(void)
 						 list);
 
 		list_del(&reusable_head->list);
-		return reusable_head->id;
+		id = reusable_head->id;
+		kfree(reusable_head);
+		return id;
 	}
 
 	return -1;

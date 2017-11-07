@@ -8,9 +8,11 @@
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_imp.h"
 #include "hyper_dmabuf_id.h"
-#include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
+#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_list.h"
+
+extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 #define REFS_PER_PAGE (PAGE_SIZE/sizeof(grant_ref_t))
 
@@ -138,397 +140,10 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 /* free sg_table */
 void hyper_dmabuf_free_sgt(struct sg_table* sgt)
 {
-	sg_free_table(sgt);
-	kfree(sgt);
-}
-
-/*
- * Creates 2 level page directory structure for referencing shared pages.
- * Top level page is a single page that contains up to 1024 refids that
- * point to 2nd level pages.
- * Each 2nd level page contains up to 1024 refids that point to shared
- * data pages.
- * There will always be one top level page and number of 2nd level pages
- * depends on number of shared data pages.
- *
- *      Top level page                2nd level pages            Data pages
- * +-------------------------+   ┌>+--------------------+ ┌--->+------------+
- * |2nd level page 0 refid   |---┘ |Data page 0 refid   |-┘    |Data page 0 |
- * |2nd level page 1 refid   |---┐ |Data page 1 refid   |-┐    +------------+
- * |           ...           |   | |     ....           | |
- * |2nd level page 1023 refid|-┐ | |Data page 1023 refid| └--->+------------+
- * +-------------------------+ | | +--------------------+      |Data page 1 |
- *                             | |                             +------------+
- *                             | └>+--------------------+
- *                             |   |Data page 1024 refid|
- *                             |   |Data page 1025 refid|
- *                             |   |       ...          |
- *                             |   |Data page 2047 refid|
- *                             |   +--------------------+
- *                             |
- *                             |        .....
- *                             └-->+-----------------------+
- *                                 |Data page 1047552 refid|
- *                                 |Data page 1047553 refid|
- *                                 |       ...             |
- *                                 |Data page 1048575 refid|-->+------------------+
- *                                 +-----------------------+   |Data page 1048575 |
- *                                                             +------------------+
- *
- * Using such 2 level structure it is possible to reference up to 4GB of
- * shared data using single refid pointing to top level page.
- *
- * Returns refid of top level page.
- */
-grant_ref_t hyper_dmabuf_create_addressing_tables(grant_ref_t *data_refs, int nents, int rdomain,
-						  struct hyper_dmabuf_shared_pages_info *shared_pages_info)
-{
-	/*
-	 * Calculate number of pages needed for 2nd level addresing:
-	 */
-	int n_2nd_level_pages = (nents/REFS_PER_PAGE +
-				((nents % REFS_PER_PAGE) ? 1: 0));
-	int i;
-	unsigned long gref_page_start;
-	grant_ref_t *tmp_page;
-	grant_ref_t top_level_ref;
-	grant_ref_t * addr_refs;
-	addr_refs = kcalloc(sizeof(grant_ref_t), n_2nd_level_pages, GFP_KERNEL);
-
-	gref_page_start = __get_free_pages(GFP_KERNEL, n_2nd_level_pages);
-	tmp_page = (grant_ref_t *)gref_page_start;
-
-	/* Store 2nd level pages to be freed later */
-	shared_pages_info->addr_pages = tmp_page;
-
-	/*TODO: make sure that allocated memory is filled with 0*/
-
-	/* Share 2nd level addressing pages in readonly mode*/
-	for (i=0; i< n_2nd_level_pages; i++) {
-		addr_refs[i] = gnttab_grant_foreign_access(rdomain,
-							   virt_to_mfn((unsigned long)tmp_page+i*PAGE_SIZE ),
-							   1);
+	if (sgt) {
+		sg_free_table(sgt);
+		kfree(sgt);
 	}
-
-	/*
-	 * fill second level pages with data refs
-	 */
-	for (i = 0; i < nents; i++) {
-		tmp_page[i] = data_refs[i];
-	}
-
-
-	/* allocate top level page */
-	gref_page_start = __get_free_pages(GFP_KERNEL, 1);
-	tmp_page = (grant_ref_t *)gref_page_start;
-
-	/* Store top level page to be freed later */
-	shared_pages_info->top_level_page = tmp_page;
-
-	/*
-	 * fill top level page with reference numbers of second level pages refs.
-	 */
-	for (i=0; i< n_2nd_level_pages; i++) {
-		tmp_page[i] =  addr_refs[i];
-	}
-
-	/* Share top level addressing page in readonly mode*/
-	top_level_ref = gnttab_grant_foreign_access(rdomain,
-						    virt_to_mfn((unsigned long)tmp_page),
-						    1);
-
-	kfree(addr_refs);
-
-	return top_level_ref;
-}
-
-/*
- * Maps provided top level ref id and then return array of pages containing data refs.
- */
-struct page** hyper_dmabuf_get_data_refs(grant_ref_t top_level_ref, int domid, int nents,
-					 struct hyper_dmabuf_shared_pages_info *shared_pages_info)
-{
-	struct page *top_level_page;
-	struct page **level2_pages;
-
-	grant_ref_t *top_level_refs;
-
-	struct gnttab_map_grant_ref top_level_map_ops;
-	struct gnttab_unmap_grant_ref top_level_unmap_ops;
-
-	struct gnttab_map_grant_ref *map_ops;
-	struct gnttab_unmap_grant_ref *unmap_ops;
-
-	unsigned long addr;
-	int n_level2_refs = 0;
-	int i;
-
-	n_level2_refs = (nents / REFS_PER_PAGE) + ((nents % REFS_PER_PAGE) ? 1 : 0);
-
-	level2_pages = kcalloc(sizeof(struct page*), n_level2_refs, GFP_KERNEL);
-
-	map_ops = kcalloc(sizeof(map_ops[0]), REFS_PER_PAGE, GFP_KERNEL);
-	unmap_ops = kcalloc(sizeof(unmap_ops[0]), REFS_PER_PAGE, GFP_KERNEL);
-
-	/* Map top level addressing page */
-	if (gnttab_alloc_pages(1, &top_level_page)) {
-		printk("Cannot allocate pages\n");
-		return NULL;
-	}
-
-	addr = (unsigned long)pfn_to_kaddr(page_to_pfn(top_level_page));
-	gnttab_set_map_op(&top_level_map_ops, addr, GNTMAP_host_map | GNTMAP_readonly,
-			  top_level_ref, domid);
-
-	gnttab_set_unmap_op(&top_level_unmap_ops, addr, GNTMAP_host_map | GNTMAP_readonly, -1);
-
-	if (gnttab_map_refs(&top_level_map_ops, NULL, &top_level_page, 1)) {
-		printk("\nxen: dom0: HYPERVISOR map grant ref failed");
-		return NULL;
-	}
-
-	if (top_level_map_ops.status) {
-		printk("\nxen: dom0: HYPERVISOR map grant ref failed status = %d",
-				top_level_map_ops.status);
-		return NULL;
-	} else {
-		top_level_unmap_ops.handle = top_level_map_ops.handle;
-	}
-
-	/* Parse contents of top level addressing page to find how many second level pages is there*/
-	top_level_refs = pfn_to_kaddr(page_to_pfn(top_level_page));
-
-	/* Map all second level pages */
-	if (gnttab_alloc_pages(n_level2_refs, level2_pages)) {
-		printk("Cannot allocate pages\n");
-		return NULL;
-	}
-
-	for (i = 0; i < n_level2_refs; i++) {
-		addr = (unsigned long)pfn_to_kaddr(page_to_pfn(level2_pages[i]));
-		gnttab_set_map_op(&map_ops[i], addr, GNTMAP_host_map | GNTMAP_readonly,
-				  top_level_refs[i], domid);
-		gnttab_set_unmap_op(&unmap_ops[i], addr, GNTMAP_host_map | GNTMAP_readonly, -1);
-	}
-
-	if (gnttab_map_refs(map_ops, NULL, level2_pages, n_level2_refs)) {
-		printk("\nxen: dom0: HYPERVISOR map grant ref failed");
-		return NULL;
-	}
-
-	/* Checks if pages were mapped correctly and at the same time is calculating total number of data refids*/
-	for (i = 0; i < n_level2_refs; i++) {
-		if (map_ops[i].status) {
-			printk("\nxen: dom0: HYPERVISOR map grant ref failed status = %d",
-			       map_ops[i].status);
-			return NULL;
-		} else {
-			unmap_ops[i].handle = map_ops[i].handle;
-		}
-	}
-
-	/* Unmap top level page, as it won't be needed any longer */
-	if (gnttab_unmap_refs(&top_level_unmap_ops, NULL, &top_level_page, 1)) {
-		printk("\xen: cannot unmap top level page\n");
-		return NULL;
-	}
-
-	gnttab_free_pages(1, &top_level_page);
-	kfree(map_ops);
-	shared_pages_info->unmap_ops = unmap_ops;
-
-	return level2_pages;
-}
-
-
-/* This collects all reference numbers for 2nd level shared pages and create a table
- * with those in 1st level shared pages then return reference numbers for this top level
- * table. */
-grant_ref_t hyper_dmabuf_create_gref_table(struct page **pages, int rdomain, int nents,
-					   struct hyper_dmabuf_shared_pages_info *shared_pages_info)
-{
-	int i = 0;
-	grant_ref_t *data_refs;
-	grant_ref_t top_level_ref;
-
-	/* allocate temp array for refs of shared data pages */
-	data_refs = kcalloc(nents, sizeof(grant_ref_t), GFP_KERNEL);
-
-	/* share data pages in rw mode*/
-	for (i=0; i<nents; i++) {
-		data_refs[i] = gnttab_grant_foreign_access(rdomain,
-							   pfn_to_mfn(page_to_pfn(pages[i])),
-							   0);
-	}
-
-	/* create additional shared pages with 2 level addressing of data pages */
-	top_level_ref = hyper_dmabuf_create_addressing_tables(data_refs, nents, rdomain,
-							      shared_pages_info);
-
-	/* Store exported pages refid to be unshared later */
-	shared_pages_info->data_refs = data_refs;
-	shared_pages_info->top_level_ref = top_level_ref;
-
-	return top_level_ref;
-}
-
-int hyper_dmabuf_cleanup_gref_table(struct hyper_dmabuf_sgt_info *sgt_info) {
-	uint32_t i = 0;
-	struct hyper_dmabuf_shared_pages_info *shared_pages_info = &sgt_info->shared_pages_info;
-
-	grant_ref_t *ref = shared_pages_info->top_level_page;
-	int n_2nd_level_pages = (sgt_info->nents/REFS_PER_PAGE +
-				((sgt_info->nents % REFS_PER_PAGE) ? 1: 0));
-
-
-	if (shared_pages_info->data_refs == NULL ||
-	    shared_pages_info->addr_pages ==  NULL ||
-	    shared_pages_info->top_level_page == NULL ||
-	    shared_pages_info->top_level_ref == -1) {
-		printk("gref table for hyper_dmabuf already cleaned up\n");
-		return 0;
-	}
-
-	/* End foreign access for 2nd level addressing pages */
-	while(ref[i] != 0 && i < n_2nd_level_pages) {
-		if (gnttab_query_foreign_access(ref[i])) {
-			printk("refid not shared !!\n");
-		}
-		if (!gnttab_end_foreign_access_ref(ref[i], 1)) {
-			printk("refid still in use!!!\n");
-		}
-		gnttab_free_grant_reference(ref[i]);
-		i++;
-	}
-	free_pages((unsigned long)shared_pages_info->addr_pages, i);
-
-
-	/* End foreign access for top level addressing page */
-	if (gnttab_query_foreign_access(shared_pages_info->top_level_ref)) {
-		printk("refid not shared !!\n");
-	}
-	gnttab_end_foreign_access_ref(shared_pages_info->top_level_ref, 1);
-	gnttab_free_grant_reference(shared_pages_info->top_level_ref);
-
-	free_pages((unsigned long)shared_pages_info->top_level_page, 1);
-
-	/* End foreign access for data pages, but do not free them */
-	for (i = 0; i < sgt_info->nents; i++) {
-		if (gnttab_query_foreign_access(shared_pages_info->data_refs[i])) {
-			printk("refid not shared !!\n");
-		}
-		gnttab_end_foreign_access_ref(shared_pages_info->data_refs[i], 0);
-		gnttab_free_grant_reference(shared_pages_info->data_refs[i]);
-	}
-
-	kfree(shared_pages_info->data_refs);
-
-	shared_pages_info->data_refs = NULL;
-	shared_pages_info->addr_pages = NULL;
-	shared_pages_info->top_level_page = NULL;
-	shared_pages_info->top_level_ref = -1;
-
-	return 0;
-}
-
-int hyper_dmabuf_cleanup_imported_pages(struct hyper_dmabuf_imported_sgt_info *sgt_info) {
-	struct hyper_dmabuf_shared_pages_info *shared_pages_info = &sgt_info->shared_pages_info;
-
-	if(shared_pages_info->unmap_ops == NULL ||
-	   shared_pages_info->data_pages == NULL) {
-		printk("Imported pages already cleaned up or buffer was not imported yet\n");
-		return 0;
-	}
-
-	if (gnttab_unmap_refs(shared_pages_info->unmap_ops, NULL,
-			      shared_pages_info->data_pages, sgt_info->nents) ) {
-		printk("Cannot unmap data pages\n");
-		return -EINVAL;
-	}
-
-	gnttab_free_pages(sgt_info->nents, shared_pages_info->data_pages);
-	kfree(shared_pages_info->data_pages);
-	kfree(shared_pages_info->unmap_ops);
-	shared_pages_info->unmap_ops = NULL;
-	shared_pages_info->data_pages = NULL;
-
-	return 0;
-}
-
-/* map and construct sg_lists from reference numbers */
-struct sg_table* hyper_dmabuf_map_pages(grant_ref_t top_level_gref, int frst_ofst,
-					int last_len, int nents, int sdomain,
-					struct hyper_dmabuf_shared_pages_info *shared_pages_info)
-{
-	struct sg_table *st;
-	struct page **pages;
-	struct gnttab_map_grant_ref *ops;
-	struct gnttab_unmap_grant_ref *unmap_ops;
-	unsigned long addr;
-	grant_ref_t *refs;
-	int i;
-	int n_level2_refs = (nents / REFS_PER_PAGE) + ((nents % REFS_PER_PAGE) ? 1 : 0);
-
-	/* Get data refids */
-	struct page** refid_pages = hyper_dmabuf_get_data_refs(top_level_gref, sdomain, nents,
-							       shared_pages_info);
-
-	pages = kcalloc(sizeof(struct page*), nents, GFP_KERNEL);
-	if (pages == NULL) {
-		return NULL;
-	}
-
-	/* allocate new pages that are mapped to shared pages via grant-table */
-	if (gnttab_alloc_pages(nents, pages)) {
-		printk("Cannot allocate pages\n");
-		return NULL;
-	}
-
-	ops = kcalloc(nents, sizeof(struct gnttab_map_grant_ref),
-		      GFP_KERNEL);
-	unmap_ops = kcalloc(nents, sizeof(struct gnttab_unmap_grant_ref),
-			    GFP_KERNEL);
-
-	for (i=0; i<nents; i++) {
-		addr = (unsigned long)pfn_to_kaddr(page_to_pfn(pages[i]));
-		refs = pfn_to_kaddr(page_to_pfn(refid_pages[i / REFS_PER_PAGE]));
-		gnttab_set_map_op(&ops[i], addr, GNTMAP_host_map | GNTMAP_readonly,
-				refs[i % REFS_PER_PAGE], sdomain);
-		gnttab_set_unmap_op(&unmap_ops[i], addr, GNTMAP_host_map | GNTMAP_readonly, -1);
-	}
-
-	if (gnttab_map_refs(ops, NULL, pages, nents)) {
-		printk("\nxen: dom0: HYPERVISOR map grant ref failed\n");
-		return NULL;
-	}
-
-	for (i=0; i<nents; i++) {
-		if (ops[i].status) {
-			printk("\nxen: dom0: HYPERVISOR map grant ref failed status = %d\n",
-				ops[0].status);
-			return NULL;
-		} else {
-			unmap_ops[i].handle = ops[i].handle;
-		}
-	}
-
-	st = hyper_dmabuf_create_sgt(pages, frst_ofst, last_len, nents);
-
-	if (gnttab_unmap_refs(shared_pages_info->unmap_ops, NULL, refid_pages,
-			n_level2_refs) ) {
-		printk("Cannot unmap 2nd level refs\n");
-		return NULL;
-	}
-
-	gnttab_free_pages(n_level2_refs, refid_pages);
-	kfree(refid_pages);
-
-	kfree(shared_pages_info->unmap_ops);
-	shared_pages_info->unmap_ops = unmap_ops;
-	shared_pages_info->data_pages = pages;
-	kfree(ops);
-
-	return st;
 }
 
 int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int force)
@@ -537,6 +152,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	struct attachment_list *attachl;
 	struct kmap_vaddr_list *va_kmapl;
 	struct vmap_vaddr_list *va_vmapl;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 
 	if (!sgt_info) {
 		printk("invalid hyper_dmabuf_id\n");
@@ -598,7 +214,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	}
 
 	/* Start cleanup of buffer in reverse order to exporting */
-	hyper_dmabuf_cleanup_gref_table(sgt_info);
+	ops->unshare_pages(&sgt_info->refs_info, sgt_info->nents);
 
 	/* unmap dma-buf */
 	dma_buf_unmap_attachment(sgt_info->active_attached->attach,
@@ -620,21 +236,22 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	return 0;
 }
 
-inline int hyper_dmabuf_sync_request_and_wait(int id, int ops)
+inline int hyper_dmabuf_sync_request_and_wait(int id, int dmabuf_ops)
 {
-	struct hyper_dmabuf_ring_rq *req;
+	struct hyper_dmabuf_req *req;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	int operands[2];
 	int ret;
 
 	operands[0] = id;
-	operands[1] = ops;
+	operands[1] = dmabuf_ops;
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_OPS_TO_SOURCE, &operands[0]);
 
 	/* send request and wait for a response */
-	ret = hyper_dmabuf_send_request(HYPER_DMABUF_DOM_ID(id), req, true);
+	ret = ops->send_req(HYPER_DMABUF_DOM_ID(id), req, true);
 
 	kfree(req);
 
@@ -753,6 +370,7 @@ static void hyper_dmabuf_ops_unmap(struct dma_buf_attachment *attachment,
 static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 {
 	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	int ret;
 	int final_release;
 
@@ -761,16 +379,22 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 
 	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dma_buf->priv;
 
-	final_release = sgt_info && !sgt_info->valid &&
-		       !dmabuf_refcount(sgt_info->dma_buf);
-
 	if (!dmabuf_refcount(sgt_info->dma_buf)) {
 		sgt_info->dma_buf = NULL;
 	}
 
-	if (final_release) {
-		hyper_dmabuf_cleanup_imported_pages(sgt_info);
+	sgt_info->num_importers--;
+
+	if (sgt_info->num_importers == 0) {
+		ops->unmap_shared_pages(&sgt_info->refs_info, sgt_info->nents);
 		hyper_dmabuf_free_sgt(sgt_info->sgt);
+		sgt_info->sgt = NULL;
+	}
+
+	final_release = sgt_info && !sgt_info->valid &&
+		        !sgt_info->num_importers;
+
+	if (final_release) {
 		ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 							HYPER_DMABUF_OPS_RELEASE_FINAL);
 	} else {

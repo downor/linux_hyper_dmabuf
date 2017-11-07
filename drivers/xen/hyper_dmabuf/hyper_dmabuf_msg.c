@@ -5,11 +5,10 @@
 #include <linux/dma-buf.h>
 #include <xen/grant_table.h>
 #include <linux/workqueue.h>
+#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_imp.h"
 #include "hyper_dmabuf_remote_sync.h"
-#include "xen/hyper_dmabuf_xen_comm.h"
-#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
 
 #define FORCED_UNEXPORTING 0
@@ -18,18 +17,17 @@ extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 struct cmd_process {
 	struct work_struct work;
-	struct hyper_dmabuf_ring_rq *rq;
+	struct hyper_dmabuf_req *rq;
 	int domid;
 };
 
-void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
-				        enum hyper_dmabuf_command command, int *operands)
+void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
+				 enum hyper_dmabuf_command command, int *operands)
 {
 	int i;
 
-	request->request_id = hyper_dmabuf_next_req_id_export();
-	request->status = HYPER_DMABUF_REQ_NOT_RESPONDED;
-	request->command = command;
+	req->status = HYPER_DMABUF_REQ_NOT_RESPONDED;
+	req->command = command;
 
 	switch(command) {
 	/* as exporter, commands to importer */
@@ -44,7 +42,7 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 		 * operands5~8 : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
 		for (i=0; i < 8; i++)
-			request->operands[i] = operands[i];
+			req->operands[i] = operands[i];
 		break;
 
 	case HYPER_DMABUF_NOTIFY_UNEXPORT:
@@ -52,7 +50,7 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 		/* command : DMABUF_DESTROY,
 		 * operands0 : hyper_dmabuf_id
 		 */
-		request->operands[0] = operands[0];
+		req->operands[0] = operands[0];
 		break;
 
 	case HYPER_DMABUF_FIRST_EXPORT:
@@ -60,7 +58,7 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 		/* command : HYPER_DMABUF_FIRST_EXPORT,
 		 * operands0 : hyper_dmabuf_id
 		 */
-		request->operands[0] = operands[0];
+		req->operands[0] = operands[0];
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
@@ -77,7 +75,7 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 		 * operands1 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
 		 */
 		for (i=0; i<2; i++)
-			request->operands[i] = operands[i];
+			req->operands[i] = operands[i];
 		break;
 
 	default:
@@ -88,10 +86,10 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
 
 void cmd_process_work(struct work_struct *work)
 {
-	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
 	struct hyper_dmabuf_sgt_info *sgt_info;
+	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
 	struct cmd_process *proc = container_of(work, struct cmd_process, work);
-	struct hyper_dmabuf_ring_rq *req;
+	struct hyper_dmabuf_req *req;
 	int domid;
 	int i;
 
@@ -114,7 +112,7 @@ void cmd_process_work(struct work_struct *work)
 		imported_sgt_info->frst_ofst = req->operands[2];
 		imported_sgt_info->last_len = req->operands[3];
 		imported_sgt_info->nents = req->operands[1];
-		imported_sgt_info->gref = req->operands[4];
+		imported_sgt_info->ref_handle = req->operands[4];
 
 		printk("DMABUF was exported\n");
 		printk("\thyper_dmabuf_id %d\n", req->operands[0]);
@@ -139,10 +137,7 @@ void cmd_process_work(struct work_struct *work)
 			break;
 		}
 
-		if (sgt_info->importer_exported)
-			printk("warning: exported flag is not supposed to be 1 already\n");
-
-		sgt_info->importer_exported = 1;
+		sgt_info->importer_exported++;
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
@@ -160,11 +155,11 @@ void cmd_process_work(struct work_struct *work)
 	kfree(proc);
 }
 
-int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
+int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 {
 	struct cmd_process *proc;
-	struct hyper_dmabuf_ring_rq *temp_req;
-	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	struct hyper_dmabuf_req *temp_req;
+	struct hyper_dmabuf_imported_sgt_info *sgt_info;
 	int ret;
 
 	if (!req) {
@@ -189,22 +184,21 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req)
 		 * operands0 : hyper_dmabuf_id
 		 */
 
-		imported_sgt_info =
-			hyper_dmabuf_find_imported(req->operands[0]);
+		sgt_info = hyper_dmabuf_find_imported(req->operands[0]);
 
-		if (imported_sgt_info) {
+		if (sgt_info) {
 			/* if anything is still using dma_buf */
-			if (imported_sgt_info->dma_buf &&
-			    dmabuf_refcount(imported_sgt_info->dma_buf) > 0) {
+			if (sgt_info->dma_buf &&
+			    dmabuf_refcount(sgt_info->dma_buf) > 0) {
 				/*
 				 * Buffer is still in  use, just mark that it should
 				 * not be allowed to export its fd anymore.
 				 */
-				imported_sgt_info->valid = 0;
+				sgt_info->valid = 0;
 			} else {
 				/* No one is using buffer, remove it from imported list */
 				hyper_dmabuf_remove_imported(req->operands[0]);
-				kfree(imported_sgt_info);
+				kfree(sgt_info);
 			}
 		} else {
 			req->status = HYPER_DMABUF_REQ_ERROR;

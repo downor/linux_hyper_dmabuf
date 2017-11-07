@@ -1,5 +1,7 @@
 TARGET_MODULE:=hyper_dmabuf
 
+PLATFORM:=XEN
+
 # If we running by kernel building system
 ifneq ($(KERNELRELEASE),)
 	$(TARGET_MODULE)-objs := hyper_dmabuf_drv.o \
@@ -9,8 +11,13 @@ ifneq ($(KERNELRELEASE),)
 				 hyper_dmabuf_msg.o \
 				 hyper_dmabuf_id.o \
 				 hyper_dmabuf_remote_sync.o \
-				 xen/hyper_dmabuf_xen_comm.o \
-				 xen/hyper_dmabuf_xen_comm_list.o
+
+ifeq ($(CONFIG_XEN), y)
+	$(TARGET_MODULE)-objs += xen/hyper_dmabuf_xen_comm.o \
+				 xen/hyper_dmabuf_xen_comm_list.o \
+				 xen/hyper_dmabuf_xen_shm.o \
+				 xen/hyper_dmabuf_xen_drv.o
+endif
 
 obj-$(CONFIG_HYPER_DMABUF) := $(TARGET_MODULE).o
 

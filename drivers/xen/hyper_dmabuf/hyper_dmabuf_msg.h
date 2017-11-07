@@ -1,6 +1,22 @@
 #ifndef __HYPER_DMABUF_MSG_H__
 #define __HYPER_DMABUF_MSG_H__
 
+#define MAX_NUMBER_OF_OPERANDS 9
+
+struct hyper_dmabuf_req {
+	unsigned int request_id;
+	unsigned int status;
+	unsigned int command;
+	unsigned int operands[MAX_NUMBER_OF_OPERANDS];
+};
+
+struct hyper_dmabuf_resp {
+	unsigned int response_id;
+	unsigned int status;
+	unsigned int command;
+	unsigned int operands[MAX_NUMBER_OF_OPERANDS];
+};
+
 enum hyper_dmabuf_command {
 	HYPER_DMABUF_EXPORT = 0x10,
 	HYPER_DMABUF_FIRST_EXPORT,
@@ -35,10 +51,11 @@ enum hyper_dmabuf_req_feedback {
 };
 
 /* create a request packet with given command and operands */
-void hyper_dmabuf_create_request(struct hyper_dmabuf_ring_rq *request,
-                                        enum hyper_dmabuf_command command, int *operands);
+void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
+				 enum hyper_dmabuf_command command,
+				 int *operands);
 
 /* parse incoming request packet (or response) and take appropriate actions for those */
-int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_ring_rq *req);
+int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req);
 
 #endif // __HYPER_DMABUF_MSG_H__

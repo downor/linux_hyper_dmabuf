@@ -1,14 +1,6 @@
 #ifndef __HYPER_DMABUF_STRUCT_H__
 #define __HYPER_DMABUF_STRUCT_H__
 
-#include <xen/interface/grant_table.h>
-
-/* each grant_ref_t is 4 bytes, so total 4096 grant_ref_t can be
- * in this block meaning we can share 4KB*4096 = 16MB of buffer
- * (needs to be increased for large buffer use-cases such as 4K
- * frame buffer) */
-#define MAX_ALLOWED_NUM_PAGES_FOR_GREF_NUM_ARRAYS 4
-
 /* stack of mapped sgts */
 struct sgt_list {
 	struct sg_table *sgt;
@@ -31,15 +23,6 @@ struct kmap_vaddr_list {
 struct vmap_vaddr_list {
 	void *vaddr;
 	struct list_head list;
-};
-
-struct hyper_dmabuf_shared_pages_info {
-	grant_ref_t *data_refs;	/* table with shared buffer pages refid */
-	grant_ref_t *addr_pages; /* pages of 2nd level addressing */
-	grant_ref_t *top_level_page; /* page of top level addressing, it contains refids of 2nd level pages */
-	grant_ref_t top_level_ref; /* top level refid */
-	struct gnttab_unmap_grant_ref* unmap_ops; /* unmap ops for mapped pages */
-	struct page **data_pages; /* data pages to be unmapped */
 };
 
 /* Exporter builds pages_info before sharing pages */
@@ -69,8 +52,8 @@ struct hyper_dmabuf_sgt_info {
 	struct kmap_vaddr_list *va_kmapped;
 	struct vmap_vaddr_list *va_vmapped;
 	bool valid;
-	bool importer_exported; /* exported locally on importer's side */
-	struct hyper_dmabuf_shared_pages_info shared_pages_info;
+	int importer_exported; /* exported locally on importer's side */
+	void *refs_info; /* hypervisor-specific info for the references */
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
 
@@ -79,14 +62,15 @@ struct hyper_dmabuf_sgt_info {
  * its own memory map once userspace asks for reference for the buffer */
 struct hyper_dmabuf_imported_sgt_info {
 	int hyper_dmabuf_id; /* unique id to reference dmabuf (HYPER_DMABUF_ID_IMPORTER(source domain id, exporter's hyper_dmabuf_id */
+	int ref_handle; /* reference number of top level addressing page of shared pages */
 	int frst_ofst;	/* start offset in shared page #1 */
 	int last_len;	/* length of data in the last shared page */
 	int nents;	/* number of pages to be shared */
-	grant_ref_t gref; /* reference number of top level addressing page of shared pages */
 	struct dma_buf *dma_buf;
 	struct sg_table *sgt; /* sgt pointer after importing buffer */
-	struct hyper_dmabuf_shared_pages_info shared_pages_info;
+	void *refs_info;
 	bool valid;
+	int num_importers;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
 

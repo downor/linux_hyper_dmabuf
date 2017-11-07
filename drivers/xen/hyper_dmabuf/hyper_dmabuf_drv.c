@@ -1,15 +1,18 @@
-#include <linux/init.h>       /* module_init, module_exit */
-#include <linux/module.h> /* version info, MODULE_LICENSE, MODULE_AUTHOR, printk() */
+#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/workqueue.h>
-#include <xen/grant_table.h>
-#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_conf.h"
+#include "hyper_dmabuf_msg.h"
+#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
-#include "xen/hyper_dmabuf_xen_comm_list.h"
-#include "xen/hyper_dmabuf_xen_comm.h"
 
-MODULE_LICENSE("Dual BSD/GPL");
+#ifdef CONFIG_XEN
+#include "xen/hyper_dmabuf_xen_drv.h"
+extern struct hyper_dmabuf_backend_ops xen_backend_ops;
+#endif
+
+MODULE_LICENSE("GPL");
 MODULE_AUTHOR("IOTG-PED, INTEL");
 
 int register_device(void);
@@ -29,24 +32,24 @@ static int hyper_dmabuf_drv_init(void)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_XEN
+	hyper_dmabuf_private.backend_ops = &xen_backend_ops;
+#endif
+
 	printk( KERN_NOTICE "initializing database for imported/exported dmabufs\n");
 
 	/* device structure initialization */
 	/* currently only does work-queue initialization */
 	hyper_dmabuf_private.work_queue = create_workqueue("hyper_dmabuf_wqueue");
-	hyper_dmabuf_private.domid = hyper_dmabuf_get_domid();
+	hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
 
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {
 		return -EINVAL;
 	}
 
-	ret = hyper_dmabuf_ring_table_init();
-	if (ret < 0) {
-		return -EINVAL;
-	}
+	ret = hyper_dmabuf_private.backend_ops->init_comm_env();
 
-	ret = hyper_dmabuf_setup_data_dir();
 	if (ret < 0) {
 		return -EINVAL;
 	}
@@ -61,8 +64,7 @@ static void hyper_dmabuf_drv_exit(void)
 	/* hash tables for export/import entries and ring_infos */
 	hyper_dmabuf_table_destroy();
 
-	hyper_dmabuf_cleanup_ringbufs();
-	hyper_dmabuf_ring_table_destroy();
+	hyper_dmabuf_private.backend_ops->destroy_comm();
 
 	/* destroy workqueue */
 	if (hyper_dmabuf_private.work_queue)
@@ -72,7 +74,6 @@ static void hyper_dmabuf_drv_exit(void)
 	if (hyper_dmabuf_private.id_queue)
 		destroy_reusable_list();
 
-	hyper_dmabuf_destroy_data_dir();
 	printk( KERN_NOTICE "dma_buf-src_sink model: Exiting" );
 	unregister_device();
 }
