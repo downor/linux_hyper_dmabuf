@@ -56,6 +56,8 @@ static int __init hyper_dmabuf_drv_init(void)
 
 	printk( KERN_NOTICE "hyper_dmabuf_starting: Initialization started" );
 
+	mutex_init(&hyper_dmabuf_private.lock);
+
 	ret = register_device();
 	if (ret < 0) {
 		return -EINVAL;

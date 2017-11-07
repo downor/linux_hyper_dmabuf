@@ -39,6 +39,7 @@ struct xen_comm_tx_ring_info {
         int gref_ring;
         int irq;
         int port;
+	struct mutex lock;
 	struct xenbus_watch watch;
 };
 

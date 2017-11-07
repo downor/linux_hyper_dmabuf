@@ -278,6 +278,8 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	ring_info->irq = ret;
 	ring_info->port = alloc_unbound.port;
 
+	mutex_init(&ring_info->lock);
+
 	dev_dbg(hyper_dmabuf_private.device,
 		"%s: allocated eventchannel gref %d  port: %d  irq: %d\n",
 		__func__,
@@ -512,6 +514,9 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 		return -EINVAL;
 	}
 
+
+	mutex_lock(&ring_info->lock);
+
 	ring = &ring_info->ring_front;
 
 	if (RING_FULL(ring))
@@ -519,6 +524,7 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 
 	new_req = RING_GET_REQUEST(ring, ring->req_prod_pvt);
 	if (!new_req) {
+		mutex_unlock(&ring_info->lock);
 		dev_err(hyper_dmabuf_private.device,
 			"NULL REQUEST\n");
 		return -EIO;
@@ -548,12 +554,16 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 		}
 
 		if (timeout < 0) {
+			mutex_unlock(&ring_info->lock);
 			dev_err(hyper_dmabuf_private.device, "request timed-out\n");
 			return -EBUSY;
 		}
 
+		mutex_unlock(&ring_info->lock);
 		return req_pending.status;
 	}
+
+	mutex_unlock(&ring_info->lock);
 
 	return 0;
 }
