@@ -260,6 +260,8 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	if (sgt_info == NULL || !sgt_info->valid) /* can't find sgt from the table */
 		return -1;
 
+	mutex_lock(&hyper_dmabuf_private.lock);
+
 	sgt_info->num_importers++;
 
 	/* send notification for export_fd to exporter */
@@ -274,6 +276,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 		kfree(req);
 		dev_err(hyper_dmabuf_private.device, "Failed to create sgt or notify exporter\n");
 		sgt_info->num_importers--;
+		mutex_unlock(&hyper_dmabuf_private.lock);
 		return -EINVAL;
 	}
 	kfree(req);
@@ -282,6 +285,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 		dev_err(hyper_dmabuf_private.device,
 			"Buffer invalid\n");
 		sgt_info->num_importers--;
+		mutex_unlock(&hyper_dmabuf_private.lock);
 		return -1;
 	} else {
 		dev_dbg(hyper_dmabuf_private.device, "Can import buffer\n");
@@ -303,6 +307,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 
 		if (!data_pages) {
 			sgt_info->num_importers--;
+			mutex_unlock(&hyper_dmabuf_private.lock);
 			return -EINVAL;
 		}
 
@@ -318,6 +323,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 		ret = export_fd_attr->fd;
 	}
 
+	mutex_unlock(&hyper_dmabuf_private.lock);
 	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
 	return 0;
 }

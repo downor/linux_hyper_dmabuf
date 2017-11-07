@@ -76,6 +76,7 @@ struct hyper_dmabuf_private {
 
 	/* backend ops - hypervisor specific */
 	struct hyper_dmabuf_backend_ops *backend_ops;
+	struct mutex lock;
 };
 
 #endif /* __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__ */
