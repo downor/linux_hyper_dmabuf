@@ -282,6 +282,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid)
 {
 	struct xen_comm_tx_ring_info *ring_info;
+	struct xen_comm_rx_ring_info *rx_ring_info;
 
 	/* check if we at all have exporter ring for given rdomain */
 	ring_info = xen_comm_find_tx_ring(domid);
@@ -307,6 +308,12 @@ void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid)
 				  (unsigned long) ring_info->ring_front.sring);
 
 	kfree(ring_info);
+
+	rx_ring_info = xen_comm_find_rx_ring(domid);
+	if (!rx_ring_info)
+		return;
+
+	BACK_RING_INIT(&(rx_ring_info->ring_back), rx_ring_info->ring_back.sring, PAGE_SIZE);
 }
 
 /* importer needs to know about shared page and port numbers for
@@ -378,9 +385,8 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 
 	BACK_RING_INIT(&ring_info->ring_back, sring, PAGE_SIZE);
 
-	ret = bind_interdomain_evtchn_to_irqhandler(domid, rx_port,
-						    back_ring_isr, 0,
-						    NULL, (void*)ring_info);
+	ret = bind_interdomain_evtchn_to_irq(domid, rx_port);
+
 	if (ret < 0) {
 		return -EINVAL;
 	}
@@ -399,6 +405,10 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 		ret = hyper_dmabuf_xen_init_tx_rbuf(domid);
 	}
 
+	ret = request_irq(ring_info->irq,
+			  back_ring_isr, 0,
+			  NULL, (void*)ring_info);
+
 	return ret;
 }
 
@@ -406,6 +416,7 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid)
 {
 	struct xen_comm_rx_ring_info *ring_info;
+	struct xen_comm_tx_ring_info *tx_ring_info;
 	struct page *shared_ring;
 
 	/* check if we have importer ring created for given sdomain */
@@ -425,6 +436,13 @@ void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid)
 	gnttab_free_pages(1, &shared_ring);
 
 	kfree(ring_info);
+
+	tx_ring_info = xen_comm_find_tx_ring(domid);
+	if (!tx_ring_info)
+		return;
+
+	SHARED_RING_INIT(tx_ring_info->ring_front.sring);
+	FRONT_RING_INIT(&(tx_ring_info->ring_front), tx_ring_info->ring_front.sring, PAGE_SIZE);
 }
 
 int hyper_dmabuf_xen_init_comm_env(void)
