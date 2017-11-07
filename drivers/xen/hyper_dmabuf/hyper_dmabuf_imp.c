@@ -129,7 +129,7 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 		sg_set_page(sgl, pages[i], PAGE_SIZE, 0);
 	}
 
-	if (i > 1) /* more than one page */ {
+	if (nents > 1) /* more than one page */ {
 		sgl = sg_next(sgl);
 		sg_set_page(sgl, pages[i], last_len, 0);
 	}
