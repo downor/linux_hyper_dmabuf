@@ -11,6 +11,80 @@
 DECLARE_HASHTABLE(hyper_dmabuf_hash_imported, MAX_ENTRY_IMPORTED);
 DECLARE_HASHTABLE(hyper_dmabuf_hash_exported, MAX_ENTRY_EXPORTED);
 
+#ifdef CONFIG_HYPER_DMABUF_SYSFS
+static ssize_t hyper_dmabuf_imported_show(struct device *drv, struct device_attribute *attr, char *buf)
+{
+	struct hyper_dmabuf_info_entry_imported *info_entry;
+	int bkt;
+	ssize_t count = 0;
+	size_t total = 0;
+
+	hash_for_each(hyper_dmabuf_hash_imported, bkt, info_entry, node) {
+		int id = info_entry->info->hyper_dmabuf_id;
+		int nents = info_entry->info->nents;
+		bool valid = info_entry->info->valid;
+		int num_importers = info_entry->info->num_importers;
+		total += nents;
+		count += scnprintf(buf + count, PAGE_SIZE - count, "id:%d, nents:%d, v:%c, numi:%d\n",
+				   id, nents, (valid ? 't' : 'f'), num_importers);
+	}
+	count += scnprintf(buf + count, PAGE_SIZE - count, "total nents: %lu\n",
+			   total);
+
+	return count;
+}
+
+static ssize_t hyper_dmabuf_exported_show(struct device *drv, struct device_attribute *attr, char *buf)
+{
+	struct hyper_dmabuf_info_entry_exported *info_entry;
+	int bkt;
+	ssize_t count = 0;
+	size_t total = 0;
+
+	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node) {
+		int id = info_entry->info->hyper_dmabuf_id;
+		int nents = info_entry->info->nents;
+		bool valid = info_entry->info->valid;
+		int importer_exported = info_entry->info->importer_exported;
+		total += nents;
+		count += scnprintf(buf + count, PAGE_SIZE - count, "id:%d, nents:%d, v:%c, ie:%d\n",
+				   id, nents, (valid ? 't' : 'f'), importer_exported);
+	}
+	count += scnprintf(buf + count, PAGE_SIZE - count, "total nents: %lu\n",
+			   total);
+
+	return count;
+}
+
+static DEVICE_ATTR(imported, S_IRUSR, hyper_dmabuf_imported_show, NULL);
+static DEVICE_ATTR(exported, S_IRUSR, hyper_dmabuf_exported_show, NULL);
+
+int hyper_dmabuf_register_sysfs(struct device *dev)
+{
+	int err;
+
+	err = device_create_file(dev, &dev_attr_imported);
+	if (err < 0)
+		goto err1;
+	err = device_create_file(dev, &dev_attr_exported);
+	if (err < 0)
+		goto err2;
+
+	return 0;
+err2:
+	device_remove_file(dev, &dev_attr_imported);
+err1:
+	return -1;
+}
+
+int hyper_dmabuf_unregister_sysfs(struct device *dev)
+{
+	device_remove_file(dev, &dev_attr_imported);
+	device_remove_file(dev, &dev_attr_exported);
+	return 0;
+}
+#endif
+
 int hyper_dmabuf_table_init()
 {
 	hash_init(hyper_dmabuf_hash_imported);

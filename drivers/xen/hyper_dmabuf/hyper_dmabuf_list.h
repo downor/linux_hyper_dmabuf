@@ -37,4 +37,7 @@ int hyper_dmabuf_remove_exported(int id);
 
 int hyper_dmabuf_remove_imported(int id);
 
+int hyper_dmabuf_register_sysfs(struct device *dev);
+int hyper_dmabuf_unregister_sysfs(struct device *dev);
+
 #endif // __HYPER_DMABUF_LIST_H__
