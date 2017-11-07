@@ -53,7 +53,7 @@ static int xen_comm_setup_data_dir(void)
 {
 	char buf[255];
 
-	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_get_domid());
+	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_xen_get_domid());
 	return xenbus_mkdir(XBT_NIL, buf, "");
 }
 
@@ -67,7 +67,7 @@ static int xen_comm_destroy_data_dir(void)
 {
 	char buf[255];
 
-	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_get_domid());
+	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_xen_get_domid());
 	return xenbus_rm(XBT_NIL, buf, "");
 }
 
@@ -130,7 +130,7 @@ static int xen_comm_get_ring_details(int domid, int rdomid, int *grefid, int *po
 	return (ret <= 0 ? 1 : 0);
 }
 
-int hyper_dmabuf_get_domid(void)
+int hyper_dmabuf_xen_get_domid(void)
 {
 	struct xenbus_transaction xbt;
 	int domid;
@@ -192,7 +192,7 @@ static void remote_dom_exporter_watch_cb(struct xenbus_watch *watch,
 	 * it means that remote domain has setup it for us and we should connect
 	 * to it.
 	 */
-	ret = xen_comm_get_ring_details(hyper_dmabuf_get_domid(), rdom,
+	ret = xen_comm_get_ring_details(hyper_dmabuf_xen_get_domid(), rdom,
 					&grefid, &port);
 
 	if (ring_info && ret != 0) {
@@ -287,7 +287,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 
 	ret = xen_comm_add_tx_ring(ring_info);
 
-	ret = xen_comm_expose_ring_details(hyper_dmabuf_get_domid(), domid,
+	ret = xen_comm_expose_ring_details(hyper_dmabuf_xen_get_domid(), domid,
 					   ring_info->gref_ring, ring_info->port);
 
 	/*
@@ -299,7 +299,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	ring_info->watch.node = (const char*) kmalloc(sizeof(char) * 255, GFP_KERNEL);
 	sprintf((char*)ring_info->watch.node,
 		"/local/domain/%d/data/hyper_dmabuf/%d/port",
-		domid, hyper_dmabuf_get_domid());
+		domid, hyper_dmabuf_xen_get_domid());
 
 	register_xenbus_watch(&ring_info->watch);
 
@@ -368,7 +368,7 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 		return 0;
 	}
 
-	ret = xen_comm_get_ring_details(hyper_dmabuf_get_domid(), domid,
+	ret = xen_comm_get_ring_details(hyper_dmabuf_xen_get_domid(), domid,
 					&rx_gref, &rx_port);
 
 	if (ret) {

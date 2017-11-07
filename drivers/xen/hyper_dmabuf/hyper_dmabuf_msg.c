@@ -39,8 +39,6 @@
 #include "hyper_dmabuf_remote_sync.h"
 #include "hyper_dmabuf_list.h"
 
-#define FORCED_UNEXPORTING 0
-
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 struct cmd_process {
