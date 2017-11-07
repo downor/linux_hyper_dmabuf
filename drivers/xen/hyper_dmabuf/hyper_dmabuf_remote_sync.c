@@ -53,7 +53,7 @@ extern struct hyper_dmabuf_private hyper_dmabuf_private;
  * later when unmapping operations are invoked to free those.
  *
  * The very first element on the bottom of each stack holds
- * are what is created when initial exporting is issued so it
+ * is what is created when initial exporting is issued so it
  * should not be modified or released by this fuction.
  */
 int hyper_dmabuf_remote_sync(int id, int ops)

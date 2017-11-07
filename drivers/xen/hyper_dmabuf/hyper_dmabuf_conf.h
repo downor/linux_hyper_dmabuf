@@ -23,5 +23,3 @@
  */
 
 /* configuration */
-
-#define CURRENT_TARGET XEN

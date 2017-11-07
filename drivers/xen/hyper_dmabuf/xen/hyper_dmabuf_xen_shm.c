@@ -108,8 +108,8 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	/* Share 2nd level addressing pages in readonly mode*/
 	for (i=0; i< n_lvl2_grefs; i++) {
 		lvl3_table[i] = gnttab_grant_foreign_access(domid,
-							   virt_to_mfn((unsigned long)lvl2_table+i*PAGE_SIZE ),
-							   1);
+							    virt_to_mfn((unsigned long)lvl2_table+i*PAGE_SIZE ),
+							    1);
 	}
 
 	/* Share lvl3_table in readonly mode*/
@@ -240,10 +240,12 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 
 	lvl3_table = (grant_ref_t *)pfn_to_kaddr(page_to_pfn(lvl3_table_page));
 
-	gnttab_set_map_op(&lvl3_map_ops, (unsigned long)lvl3_table, GNTMAP_host_map | GNTMAP_readonly,
+	gnttab_set_map_op(&lvl3_map_ops, (unsigned long)lvl3_table,
+			  GNTMAP_host_map | GNTMAP_readonly,
 			  (grant_ref_t)lvl3_gref, domid);
 
-	gnttab_set_unmap_op(&lvl3_unmap_ops, (unsigned long)lvl3_table, GNTMAP_host_map | GNTMAP_readonly, -1);
+	gnttab_set_unmap_op(&lvl3_unmap_ops, (unsigned long)lvl3_table,
+			    GNTMAP_host_map | GNTMAP_readonly, -1);
 
 	if (gnttab_map_refs(&lvl3_map_ops, NULL, &lvl3_table_page, 1)) {
 		dev_err(hyper_dmabuf_private.device, "HYPERVISOR map grant ref failed");
@@ -285,8 +287,9 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 	/* Checks if pages were mapped correctly */
 	for (i = 0; i < n_lvl2_grefs; i++) {
 		if (lvl2_map_ops[i].status) {
-			dev_err(hyper_dmabuf_private.device, "HYPERVISOR map grant ref failed status = %d",
-			       lvl2_map_ops[i].status);
+			dev_err(hyper_dmabuf_private.device,
+				"HYPERVISOR map grant ref failed status = %d",
+				lvl2_map_ops[i].status);
 			return NULL;
 		} else {
 			lvl2_unmap_ops[i].handle = lvl2_map_ops[i].handle;
@@ -344,7 +347,8 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 
 	for (i = 0; i < nents; i++) {
 		if (data_map_ops[i].status) {
-			dev_err(hyper_dmabuf_private.device, "HYPERVISOR map grant ref failed status = %d\n",
+			dev_err(hyper_dmabuf_private.device,
+				"HYPERVISOR map grant ref failed status = %d\n",
 				data_map_ops[i].status);
 			return NULL;
 		} else {
@@ -376,7 +380,8 @@ int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents) {
 
 	if (sh_pages_info->unmap_ops == NULL ||
 	    sh_pages_info->data_pages == NULL) {
-		dev_warn(hyper_dmabuf_private.device, "Imported pages already cleaned up or buffer was not imported yet\n");
+		dev_warn(hyper_dmabuf_private.device,
+			 "Imported pages already cleaned up or buffer was not imported yet\n");
 		return 0;
 	}
 

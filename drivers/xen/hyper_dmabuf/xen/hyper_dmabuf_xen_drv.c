@@ -37,7 +37,7 @@
 #include "hyper_dmabuf_xen_shm.h"
 
 struct hyper_dmabuf_backend_ops xen_backend_ops = {
-	.get_vm_id = hyper_dmabuf_get_domid,
+	.get_vm_id = hyper_dmabuf_xen_get_domid,
 	.share_pages = hyper_dmabuf_xen_share_pages,
 	.unshare_pages = hyper_dmabuf_xen_unshare_pages,
 	.map_shared_pages = (void *)hyper_dmabuf_xen_map_shared_pages,

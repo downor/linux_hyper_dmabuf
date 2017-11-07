@@ -50,7 +50,7 @@ struct xen_comm_rx_ring_info {
 	struct gnttab_unmap_grant_ref unmap_op;
 };
 
-int hyper_dmabuf_get_domid(void);
+int hyper_dmabuf_xen_get_domid(void);
 
 int hyper_dmabuf_xen_init_comm_env(void);
 
