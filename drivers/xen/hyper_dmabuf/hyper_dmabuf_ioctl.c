@@ -25,7 +25,7 @@ static int hyper_dmabuf_tx_ch_setup(void *data)
 	int ret = 0;
 
 	if (!data) {
-		printk("user data is NULL\n");
+		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
 		return -1;
 	}
 	tx_ch_attr = (struct ioctl_hyper_dmabuf_tx_ch_setup *)data;
@@ -42,7 +42,7 @@ static int hyper_dmabuf_rx_ch_setup(void *data)
 	int ret = 0;
 
 	if (!data) {
-		printk("user data is NULL\n");
+		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
 		return -1;
 	}
 
@@ -67,7 +67,7 @@ static int hyper_dmabuf_export_remote(void *data)
 	int ret = 0;
 
 	if (!data) {
-		printk("user data is NULL\n");
+		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
 		return -1;
 	}
 
@@ -76,7 +76,7 @@ static int hyper_dmabuf_export_remote(void *data)
 	dma_buf = dma_buf_get(export_remote_attr->dmabuf_fd);
 
 	if (!dma_buf) {
-		printk("Cannot get dma buf\n");
+		dev_err(hyper_dmabuf_private.device,  "Cannot get dma buf\n");
 		return -1;
 	}
 
@@ -94,7 +94,7 @@ static int hyper_dmabuf_export_remote(void *data)
 
 	attachment = dma_buf_attach(dma_buf, hyper_dmabuf_private.device);
 	if (!attachment) {
-		printk("Cannot get attachment\n");
+		dev_err(hyper_dmabuf_private.device, "Cannot get attachment\n");
 		return -1;
 	}
 
@@ -206,8 +206,10 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	int operand;
 	int ret = 0;
 
+	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
+
 	if (!data) {
-		printk("user data is NULL\n");
+		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
 		return -EINVAL;
 	}
 
@@ -218,12 +220,15 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	if (sgt_info == NULL) /* can't find sgt from the table */
 		return -1;
 
-	printk("%s Found buffer gref %d  off %d last len %d nents %d domain %d\n", __func__,
-		sgt_info->ref_handle, sgt_info->frst_ofst,
-		sgt_info->last_len, sgt_info->nents,
-		HYPER_DMABUF_DOM_ID(sgt_info->hyper_dmabuf_id));
+	dev_dbg(hyper_dmabuf_private.device,
+		  "%s Found buffer gref %d  off %d last len %d nents %d domain %d\n", __func__,
+		  sgt_info->ref_handle, sgt_info->frst_ofst,
+		  sgt_info->last_len, sgt_info->nents,
+		  HYPER_DMABUF_DOM_ID(sgt_info->hyper_dmabuf_id));
 
 	if (!sgt_info->sgt) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"%s buffer %d pages not mapped yet\n", __func__,sgt_info->hyper_dmabuf_id);
 		data_pages = ops->map_shared_pages(sgt_info->ref_handle,
 						   HYPER_DMABUF_DOM_ID(sgt_info->hyper_dmabuf_id),
 						   sgt_info->nents,
@@ -244,7 +249,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 
 	if (!sgt_info->sgt || ret) {
 		kfree(req);
-		printk("Failed to create sgt or notify exporter\n");
+		dev_err(hyper_dmabuf_private.device, "Failed to create sgt or notify exporter\n");
 		return -EINVAL;
 	}
 	kfree(req);
@@ -258,6 +263,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 		sgt_info->num_importers++;
 	}
 
+	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
 	return ret;
 }
 
@@ -272,8 +278,10 @@ static int hyper_dmabuf_unexport(void *data)
 	struct hyper_dmabuf_req *req;
 	int ret;
 
+	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
+
 	if (!data) {
-		printk("user data is NULL\n");
+		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
 		return -EINVAL;
 	}
 
@@ -302,6 +310,8 @@ static int hyper_dmabuf_unexport(void *data)
 	/* free msg */
 	kfree(req);
 
+	dev_dbg(hyper_dmabuf_private.device,
+		"Marking buffer %d as invalid\n", unexport_attr->hyper_dmabuf_id);
 	/* no longer valid */
 	sgt_info->valid = 0;
 
@@ -312,8 +322,9 @@ static int hyper_dmabuf_unexport(void *data)
 	 * is called (importer does this only when there's no
 	 * no consumer of locally exported FDs)
 	 */
-	printk("before claning up buffer completly\n");
 	if (!sgt_info->importer_exported) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"claning up buffer %d completly\n", unexport_attr->hyper_dmabuf_id);
 		hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
 		hyper_dmabuf_remove_exported(unexport_attr->hyper_dmabuf_id);
 		kfree(sgt_info);
@@ -321,6 +332,7 @@ static int hyper_dmabuf_unexport(void *data)
 		store_reusable_id(unexport_attr->hyper_dmabuf_id);
 	}
 
+	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
 	return ret;
 }
 
@@ -332,7 +344,7 @@ static int hyper_dmabuf_query(void *data)
 	int ret = 0;
 
 	if (!data) {
-		printk("user data is NULL\n");
+		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
 		return -EINVAL;
 	}
 
@@ -343,7 +355,7 @@ static int hyper_dmabuf_query(void *data)
 
 	/* if dmabuf can't be found in both lists, return */
 	if (!(sgt_info && imported_sgt_info)) {
-		printk("can't find entry anywhere\n");
+		dev_err(hyper_dmabuf_private.device, "can't find entry anywhere\n");
 		return -EINVAL;
 	}
 
@@ -419,25 +431,25 @@ static long hyper_dmabuf_ioctl(struct file *filp,
 	func = ioctl->func;
 
 	if (unlikely(!func)) {
-		printk("no function\n");
+		dev_err(hyper_dmabuf_private.device, "no function\n");
 		return -EINVAL;
 	}
 
 	kdata = kmalloc(_IOC_SIZE(cmd), GFP_KERNEL);
 	if (!kdata) {
-		printk("no memory\n");
+		dev_err(hyper_dmabuf_private.device, "no memory\n");
 		return -ENOMEM;
 	}
 
 	if (copy_from_user(kdata, (void __user *)param, _IOC_SIZE(cmd)) != 0) {
-		printk("failed to copy from user arguments\n");
+		dev_err(hyper_dmabuf_private.device, "failed to copy from user arguments\n");
 		return -EFAULT;
 	}
 
 	ret = func(kdata);
 
 	if (copy_to_user((void __user *)param, kdata, _IOC_SIZE(cmd)) != 0) {
-		printk("failed to copy to user arguments\n");
+		dev_err(hyper_dmabuf_private.device, "failed to copy to user arguments\n");
 		return -EFAULT;
 	}
 
