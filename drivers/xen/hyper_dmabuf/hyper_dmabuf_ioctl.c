@@ -115,11 +115,24 @@ static int hyper_dmabuf_export_remote(void *data)
 	ret = hyper_dmabuf_find_id_exported(dma_buf, export_remote_attr->remote_domain);
 	sgt_info = hyper_dmabuf_find_exported(ret);
 	if (ret != -1 && sgt_info->valid) {
+		/*
+		 * Check if unexport is already scheduled for that buffer,
+		 * if so try to cancel it. If that will fail, buffer needs
+		 * to be reexport once again.
+		 */
+		if (sgt_info->unexport_scheduled) {
+			if (!cancel_delayed_work_sync(&sgt_info->unexport_work)) {
+				dma_buf_put(dma_buf);
+				goto reexport;
+			}
+			sgt_info->unexport_scheduled = 0;
+		}
 		dma_buf_put(dma_buf);
 		export_remote_attr->hyper_dmabuf_id = ret;
 		return 0;
 	}
 
+reexport:
 	attachment = dma_buf_attach(dma_buf, hyper_dmabuf_private.device);
 	if (!attachment) {
 		dev_err(hyper_dmabuf_private.device, "Cannot get attachment\n");
@@ -133,7 +146,7 @@ static int hyper_dmabuf_export_remote(void *data)
 
 	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
 
-	sgt_info = kmalloc(sizeof(*sgt_info), GFP_KERNEL);
+	sgt_info = kcalloc(1, sizeof(*sgt_info), GFP_KERNEL);
 
 	sgt_info->hyper_dmabuf_id = hyper_dmabuf_get_id();
 
@@ -141,7 +154,6 @@ static int hyper_dmabuf_export_remote(void *data)
 	sgt_info->hyper_dmabuf_rdomain = export_remote_attr->remote_domain;
 	sgt_info->dma_buf = dma_buf;
 	sgt_info->valid = 1;
-	sgt_info->importer_exported = 0;
 
 	sgt_info->active_sgts = kmalloc(sizeof(struct sgt_list), GFP_KERNEL);
 	sgt_info->active_attached = kmalloc(sizeof(struct attachment_list), GFP_KERNEL);
@@ -245,8 +257,35 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 
 	/* look for dmabuf for the id */
 	sgt_info = hyper_dmabuf_find_imported(export_fd_attr->hyper_dmabuf_id);
-	if (sgt_info == NULL) /* can't find sgt from the table */
+	if (sgt_info == NULL || !sgt_info->valid) /* can't find sgt from the table */
 		return -1;
+
+	sgt_info->num_importers++;
+
+	/* send notification for export_fd to exporter */
+	operand = sgt_info->hyper_dmabuf_id;
+
+	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_FIRST_EXPORT, &operand);
+
+	ret = ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, true);
+
+	if (ret < 0) {
+		kfree(req);
+		dev_err(hyper_dmabuf_private.device, "Failed to create sgt or notify exporter\n");
+		sgt_info->num_importers--;
+		return -EINVAL;
+	}
+	kfree(req);
+
+	if (ret == HYPER_DMABUF_REQ_ERROR) {
+		dev_err(hyper_dmabuf_private.device,
+			"Buffer invalid\n");
+		sgt_info->num_importers--;
+		return -1;
+	} else {
+		dev_dbg(hyper_dmabuf_private.device, "Can import buffer\n");
+	}
 
 	dev_dbg(hyper_dmabuf_private.device,
 		  "%s Found buffer gref %d  off %d last len %d nents %d domain %d\n", __func__,
@@ -262,49 +301,87 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 						   sgt_info->nents,
 						   &sgt_info->refs_info);
 
+		if (!data_pages) {
+			sgt_info->num_importers--;
+			return -EINVAL;
+		}
+
 		sgt_info->sgt = hyper_dmabuf_create_sgt(data_pages, sgt_info->frst_ofst,
 							sgt_info->last_len, sgt_info->nents);
 
 	}
-
-	/* send notification for export_fd to exporter */
-	operand = sgt_info->hyper_dmabuf_id;
-
-	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_FIRST_EXPORT, &operand);
-
-	ret = ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, false);
-
-	if (!sgt_info->sgt || ret) {
-		kfree(req);
-		dev_err(hyper_dmabuf_private.device, "Failed to create sgt or notify exporter\n");
-		return -EINVAL;
-	}
-	kfree(req);
 
 	export_fd_attr->fd = hyper_dmabuf_export_fd(sgt_info, export_fd_attr->flags);
 
 	if (export_fd_attr->fd < 0) {
 		/* fail to get fd */
 		ret = export_fd_attr->fd;
-	} else {
-		sgt_info->num_importers++;
 	}
 
-	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
-	return ret;
+	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
+	return 0;
 }
 
 /* unexport dmabuf from the database and send int req to the source domain
  * to unmap it.
  */
+static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
+{
+	struct hyper_dmabuf_req *req;
+	int hyper_dmabuf_id;
+	int ret;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
+	struct hyper_dmabuf_sgt_info *sgt_info =
+		container_of(work, struct hyper_dmabuf_sgt_info, unexport_work.work);
+
+	if (!sgt_info)
+		return;
+
+	hyper_dmabuf_id = sgt_info->hyper_dmabuf_id;
+
+	dev_dbg(hyper_dmabuf_private.device,
+		"Marking buffer %d as invalid\n", hyper_dmabuf_id);
+	/* no longer valid */
+	sgt_info->valid = 0;
+
+	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &hyper_dmabuf_id);
+
+	/* Now send unexport request to remote domain, marking that buffer should not be used anymore */
+	ret = ops->send_req(sgt_info->hyper_dmabuf_rdomain, req, true);
+	if (ret < 0) {
+		dev_err(hyper_dmabuf_private.device, "unexport message for buffer %d failed\n", hyper_dmabuf_id);
+	}
+
+	/* free msg */
+	kfree(req);
+	sgt_info->unexport_scheduled = 0;
+
+	/*
+	 * Immediately clean-up if it has never been exported by importer
+	 * (so no SGT is constructed on importer).
+	 * clean it up later in remote sync when final release ops
+	 * is called (importer does this only when there's no
+	 * no consumer of locally exported FDs)
+	 */
+	if (!sgt_info->importer_exported) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"claning up buffer %d completly\n", hyper_dmabuf_id);
+		hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
+		hyper_dmabuf_remove_exported(hyper_dmabuf_id);
+		kfree(sgt_info);
+		/* register hyper_dmabuf_id to the list for reuse */
+		store_reusable_id(hyper_dmabuf_id);
+	}
+}
+
+/* Schedules unexport of dmabuf.
+ */
 static int hyper_dmabuf_unexport(void *data)
 {
 	struct ioctl_hyper_dmabuf_unexport *unexport_attr;
-	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	struct hyper_dmabuf_sgt_info *sgt_info;
-	struct hyper_dmabuf_req *req;
-	int ret;
 
 	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
 
@@ -318,50 +395,24 @@ static int hyper_dmabuf_unexport(void *data)
 	/* find dmabuf in export list */
 	sgt_info = hyper_dmabuf_find_exported(unexport_attr->hyper_dmabuf_id);
 
+	dev_dbg(hyper_dmabuf_private.device, "scheduling unexport of buffer %d\n", unexport_attr->hyper_dmabuf_id);
+
 	/* failed to find corresponding entry in export list */
 	if (sgt_info == NULL) {
 		unexport_attr->status = -EINVAL;
 		return -EFAULT;
 	}
 
-	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+	if (sgt_info->unexport_scheduled)
+		return 0;
 
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &unexport_attr->hyper_dmabuf_id);
+	sgt_info->unexport_scheduled = 1;
+	INIT_DELAYED_WORK(&sgt_info->unexport_work, hyper_dmabuf_delayed_unexport);
+	schedule_delayed_work(&sgt_info->unexport_work,
+			      msecs_to_jiffies(unexport_attr->delay_ms));
 
-	/* Now send unexport request to remote domain, marking that buffer should not be used anymore */
-	ret = ops->send_req(sgt_info->hyper_dmabuf_rdomain, req, true);
-	if (ret < 0) {
-		kfree(req);
-		return -EFAULT;
-	}
-
-	/* free msg */
-	kfree(req);
-
-	dev_dbg(hyper_dmabuf_private.device,
-		"Marking buffer %d as invalid\n", unexport_attr->hyper_dmabuf_id);
-	/* no longer valid */
-	sgt_info->valid = 0;
-
-	/*
-	 * Immediately clean-up if it has never been exported by importer
-	 * (so no SGT is constructed on importer).
-	 * clean it up later in remote sync when final release ops
-	 * is called (importer does this only when there's no
-	 * no consumer of locally exported FDs)
-	 */
-	if (!sgt_info->importer_exported) {
-		dev_dbg(hyper_dmabuf_private.device,
-			"claning up buffer %d completly\n", unexport_attr->hyper_dmabuf_id);
-		hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
-		hyper_dmabuf_remove_exported(unexport_attr->hyper_dmabuf_id);
-		kfree(sgt_info);
-		/* register hyper_dmabuf_id to the list for reuse */
-		store_reusable_id(unexport_attr->hyper_dmabuf_id);
-	}
-
-	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
-	return ret;
+	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
+	return 0;
 }
 
 static int hyper_dmabuf_query(void *data)

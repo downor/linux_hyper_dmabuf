@@ -341,6 +341,10 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	/* extract pages from sgt */
 	page_info = hyper_dmabuf_ext_pgs(sgt_info->sgt);
 
+	if (!page_info) {
+		return NULL;
+	}
+
 	/* create a new sg_table with extracted pages */
 	st = hyper_dmabuf_create_sgt(page_info->pages, page_info->frst_ofst,
 				page_info->last_len, page_info->nents);
