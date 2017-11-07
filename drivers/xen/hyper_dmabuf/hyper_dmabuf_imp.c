@@ -24,7 +24,7 @@ int dmabuf_refcount(struct dma_buf *dma_buf)
 	return -1;
 }
 
-/* return total number of pages referecned by a sgt
+/* return total number of pages referenced by a sgt
  * for pre-calculation of # of pages behind a given sgt
  */
 static int hyper_dmabuf_get_num_pgs(struct sg_table *sgt)

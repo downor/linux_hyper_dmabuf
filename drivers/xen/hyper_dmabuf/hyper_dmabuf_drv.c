@@ -22,7 +22,7 @@ int unregister_device(void);
 struct hyper_dmabuf_private hyper_dmabuf_private;
 
 /*===============================================================================================*/
-static int hyper_dmabuf_drv_init(void)
+static int __init hyper_dmabuf_drv_init(void)
 {
 	int ret = 0;
 
@@ -51,10 +51,16 @@ static int hyper_dmabuf_drv_init(void)
 	}
 
 	ret = hyper_dmabuf_private.backend_ops->init_comm_env();
-
 	if (ret < 0) {
 		return -EINVAL;
 	}
+
+#ifdef CONFIG_HYPER_DMABUF_SYSFS
+	ret = hyper_dmabuf_register_sysfs(hyper_dmabuf_private.device);
+	if (ret < 0) {
+		return -EINVAL;
+	}
+#endif
 
 	/* interrupt for comm should be registered here: */
 	return ret;
@@ -63,6 +69,10 @@ static int hyper_dmabuf_drv_init(void)
 /*-----------------------------------------------------------------------------------------------*/
 static void hyper_dmabuf_drv_exit(void)
 {
+#ifdef CONFIG_HYPER_DMABUF_SYSFS
+	hyper_dmabuf_unregister_sysfs(hyper_dmabuf_private.device);
+#endif
+
 	/* hash tables for export/import entries and ring_infos */
 	hyper_dmabuf_table_destroy();
 
