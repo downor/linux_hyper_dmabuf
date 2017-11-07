@@ -36,7 +36,7 @@
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
 
-#ifdef CONFIG_XEN
+#ifdef CONFIG_HYPER_DMABUF_XEN
 #include "xen/hyper_dmabuf_xen_drv.h"
 extern struct hyper_dmabuf_backend_ops xen_backend_ops;
 #endif
@@ -61,7 +61,7 @@ static int __init hyper_dmabuf_drv_init(void)
 		return -EINVAL;
 	}
 
-#ifdef CONFIG_XEN
+#ifdef CONFIG_HYPER_DMABUF_XEN
 	hyper_dmabuf_private.backend_ops = &xen_backend_ops;
 #endif
 
