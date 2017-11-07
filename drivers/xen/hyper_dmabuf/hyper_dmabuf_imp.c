@@ -7,6 +7,7 @@
 #include <asm/xen/page.h>
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_imp.h"
+#include "hyper_dmabuf_id.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"

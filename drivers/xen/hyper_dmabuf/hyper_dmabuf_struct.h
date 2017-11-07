@@ -3,15 +3,6 @@
 
 #include <xen/interface/grant_table.h>
 
-/* Importer combine source domain id with given hyper_dmabuf_id
- * to make it unique in case there are multiple exporters */
-
-#define HYPER_DMABUF_ID_IMPORTER(domid, id) \
-	((((domid) & 0xFF) << 24) | ((id) & 0xFFFFFF))
-
-#define HYPER_DMABUF_DOM_ID(id) \
-	(((id) >> 24) & 0xFF)
-
 /* each grant_ref_t is 4 bytes, so total 4096 grant_ref_t can be
  * in this block meaning we can share 4KB*4096 = 16MB of buffer
  * (needs to be increased for large buffer use-cases such as 4K
