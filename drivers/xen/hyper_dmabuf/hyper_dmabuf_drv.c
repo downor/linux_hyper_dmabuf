@@ -1,6 +1,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/workqueue.h>
+#include <linux/device.h>
 #include "hyper_dmabuf_conf.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
@@ -36,7 +37,8 @@ static int hyper_dmabuf_drv_init(void)
 	hyper_dmabuf_private.backend_ops = &xen_backend_ops;
 #endif
 
-	printk( KERN_NOTICE "initializing database for imported/exported dmabufs\n");
+	dev_info(hyper_dmabuf_private.device,
+		 "initializing database for imported/exported dmabufs\n");
 
 	/* device structure initialization */
 	/* currently only does work-queue initialization */

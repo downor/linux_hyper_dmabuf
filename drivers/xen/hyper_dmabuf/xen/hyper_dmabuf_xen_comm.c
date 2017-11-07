@@ -10,10 +10,13 @@
 #include <asm/xen/page.h>
 #include "hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_xen_comm_list.h"
+#include "../hyper_dmabuf_drv.h"
 
 static int export_req_id = 0;
 
 struct hyper_dmabuf_req req_pending = {0};
+
+extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 /* Creates entry in xen store that will keep details of all
  * exporter rings created by this domain
@@ -55,14 +58,16 @@ static int xen_comm_expose_ring_details(int domid, int rdomid,
 	ret = xenbus_printf(XBT_NIL, buf, "grefid", "%d", gref);
 
 	if (ret) {
-		printk("Failed to write xenbus entry %s: %d\n", buf, ret);
+		dev_err(hyper_dmabuf_private.device,
+			"Failed to write xenbus entry %s: %d\n", buf, ret);
 		return ret;
 	}
 
 	ret = xenbus_printf(XBT_NIL, buf, "port", "%d", port);
 
 	if (ret) {
-		printk("Failed to write xenbus entry %s: %d\n", buf, ret);
+		dev_err(hyper_dmabuf_private.device,
+			"Failed to write xenbus entry %s: %d\n", buf, ret);
 		return ret;
 	}
 
@@ -81,14 +86,16 @@ static int xen_comm_get_ring_details(int domid, int rdomid, int *grefid, int *po
 	ret = xenbus_scanf(XBT_NIL, buf, "grefid", "%d", grefid);
 
 	if (ret <= 0) {
-		printk("Failed to read xenbus entry %s: %d\n", buf, ret);
+		dev_err(hyper_dmabuf_private.device,
+			"Failed to read xenbus entry %s: %d\n", buf, ret);
 		return ret;
 	}
 
 	ret = xenbus_scanf(XBT_NIL, buf, "port", "%d", port);
 
 	if (ret <= 0) {
-		printk("Failed to read xenbus entry %s: %d\n", buf, ret);
+		dev_err(hyper_dmabuf_private.device,
+			"Failed to read xenbus entry %s: %d\n", buf, ret);
 		return ret;
 	}
 
@@ -161,10 +168,12 @@ static void remote_dom_exporter_watch_cb(struct xenbus_watch *watch,
 					&grefid, &port);
 
 	if (ring_info && ret != 0) {
-		printk("Remote exporter closed, cleaninup importer\n");
+		dev_info(hyper_dmabuf_private.device,
+			 "Remote exporter closed, cleaninup importer\n");
 		hyper_dmabuf_xen_cleanup_rx_rbuf(rdom);
 	} else if (!ring_info && ret == 0) {
-		printk("Registering importer\n");
+		dev_info(hyper_dmabuf_private.device,
+			 "Registering importer\n");
 		hyper_dmabuf_xen_init_rx_rbuf(rdom);
 	}
 }
@@ -184,7 +193,8 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	ring_info = xen_comm_find_tx_ring(domid);
 
 	if (ring_info) {
-		printk("tx ring ch to domid = %d already exist\ngref = %d, port = %d\n",
+		dev_info(hyper_dmabuf_private.device,
+			 "tx ring ch to domid = %d already exist\ngref = %d, port = %d\n",
 		ring_info->rdomain, ring_info->gref_ring, ring_info->port);
 		return 0;
 	}
@@ -216,7 +226,8 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	ret = HYPERVISOR_event_channel_op(EVTCHNOP_alloc_unbound,
 					&alloc_unbound);
 	if (ret != 0) {
-		printk("Cannot allocate event channel\n");
+		dev_err(hyper_dmabuf_private.device,
+			"Cannot allocate event channel\n");
 		return -EINVAL;
 	}
 
@@ -226,7 +237,8 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 					NULL, (void*) ring_info);
 
 	if (ret < 0) {
-		printk("Failed to setup event channel\n");
+		dev_err(hyper_dmabuf_private.device,
+			"Failed to setup event channel\n");
 		close.port = alloc_unbound.port;
 		HYPERVISOR_event_channel_op(EVTCHNOP_close, &close);
 		gnttab_end_foreign_access(ring_info->gref_ring, 0,
@@ -238,7 +250,8 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	ring_info->irq = ret;
 	ring_info->port = alloc_unbound.port;
 
-	printk("%s: allocated eventchannel gref %d  port: %d  irq: %d\n",
+	dev_dbg(hyper_dmabuf_private.device,
+		"%s: allocated eventchannel gref %d  port: %d  irq: %d\n",
 		__func__,
 		ring_info->gref_ring,
 		ring_info->port,
@@ -315,7 +328,8 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	ring_info = xen_comm_find_rx_ring(domid);
 
 	if (ring_info) {
-		printk("rx ring ch from domid = %d already exist\n", ring_info->sdomain);
+		dev_info(hyper_dmabuf_private.device,
+			 "rx ring ch from domid = %d already exist\n", ring_info->sdomain);
 		return 0;
 	}
 
@@ -323,7 +337,8 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 					&rx_gref, &rx_port);
 
 	if (ret) {
-		printk("Domain %d has not created exporter ring for current domain\n", domid);
+		dev_err(hyper_dmabuf_private.device,
+			"Domain %d has not created exporter ring for current domain\n", domid);
 		return ret;
 	}
 
@@ -346,12 +361,12 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 
 	ret = gnttab_map_refs(map_ops, NULL, &shared_ring, 1);
 	if (ret < 0) {
-		printk("Cannot map ring\n");
+		dev_err(hyper_dmabuf_private.device, "Cannot map ring\n");
 		return -EINVAL;
 	}
 
 	if (map_ops[0].status) {
-		printk("Ring mapping failed\n");
+		dev_err(hyper_dmabuf_private.device, "Ring mapping failed\n");
 		return -EINVAL;
 	} else {
 		ring_info->unmap_op.handle = map_ops[0].handle;
@@ -372,7 +387,8 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 
 	ring_info->irq = ret;
 
-	printk("%s: bound to eventchannel port: %d  irq: %d\n", __func__,
+	dev_dbg(hyper_dmabuf_private.device,
+		"%s: bound to eventchannel port: %d  irq: %d\n", __func__,
 		rx_port,
 		ring_info->irq);
 
@@ -445,7 +461,8 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 	/* find a ring info for the channel */
 	ring_info = xen_comm_find_tx_ring(domid);
 	if (!ring_info) {
-		printk("Can't find ring info for the channel\n");
+		dev_err(hyper_dmabuf_private.device,
+			"Can't find ring info for the channel\n");
 		return -EINVAL;
 	}
 
@@ -456,7 +473,8 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 
 	new_req = RING_GET_REQUEST(ring, ring->req_prod_pvt);
 	if (!new_req) {
-		printk("NULL REQUEST\n");
+		dev_err(hyper_dmabuf_private.device,
+			"NULL REQUEST\n");
 		return -EIO;
 	}
 
@@ -484,7 +502,7 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 		}
 
 		if (timeout < 0) {
-			printk("request timed-out\n");
+			dev_err(hyper_dmabuf_private.device, "request timed-out\n");
 			return -EBUSY;
 		}
 	}
@@ -507,6 +525,8 @@ static irqreturn_t back_ring_isr(int irq, void *info)
 
 	ring_info = (struct xen_comm_rx_ring_info *)info;
 	ring = &ring_info->ring_back;
+
+	dev_dbg(hyper_dmabuf_private.device, "%s\n", __func__);
 
 	do {
 		rc = ring->req_cons;
@@ -558,6 +578,8 @@ static irqreturn_t front_ring_isr(int irq, void *info)
 	ring_info = (struct xen_comm_tx_ring_info *)info;
 	ring = &ring_info->ring_front;
 
+	dev_dbg(hyper_dmabuf_private.device, "%s\n", __func__);
+
 	do {
 		more_to_do = 0;
 		rp = ring->sring->rsp_prod;
@@ -576,16 +598,21 @@ static irqreturn_t front_ring_isr(int irq, void *info)
 							(struct hyper_dmabuf_req *)resp);
 
 				if (ret < 0) {
-					printk("getting error while parsing response\n");
+					dev_err(hyper_dmabuf_private.device,
+						"getting error while parsing response\n");
 				}
 			} else if (resp->status == HYPER_DMABUF_REQ_PROCESSED) {
 				/* for debugging dma_buf remote synchronization */
-				printk("original request = 0x%x\n", resp->command);
-				printk("Just got HYPER_DMABUF_REQ_PROCESSED\n");
+				dev_dbg(hyper_dmabuf_private.device,
+					"original request = 0x%x\n", resp->command);
+				dev_dbg(hyper_dmabuf_private.device,
+					"Just got HYPER_DMABUF_REQ_PROCESSED\n");
 			} else if (resp->status == HYPER_DMABUF_REQ_ERROR) {
 				/* for debugging dma_buf remote synchronization */
-				printk("original request = 0x%x\n", resp->command);
-				printk("Just got HYPER_DMABUF_REQ_ERROR\n");
+				dev_dbg(hyper_dmabuf_private.device,
+					"original request = 0x%x\n", resp->command);
+				dev_dbg(hyper_dmabuf_private.device,
+					"Just got HYPER_DMABUF_REQ_ERROR\n");
 			}
 		}
 

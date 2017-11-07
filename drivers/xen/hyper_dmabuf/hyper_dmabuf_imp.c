@@ -155,7 +155,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 
 	if (!sgt_info) {
-		printk("invalid hyper_dmabuf_id\n");
+		dev_err(hyper_dmabuf_private.device, "invalid hyper_dmabuf_id\n");
 		return -EINVAL;
 	}
 
@@ -168,7 +168,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	    !list_empty(&sgt_info->va_vmapped->list) ||
 	    !list_empty(&sgt_info->active_sgts->list) ||
 	    !list_empty(&sgt_info->active_attached->list))) {
-		printk("dma-buf is used by importer\n");
+		dev_warn(hyper_dmabuf_private.device, "dma-buf is used by importer\n");
 		return -EPERM;
 	}
 
@@ -273,7 +273,8 @@ static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf, struct device* dev,
 						 HYPER_DMABUF_OPS_ATTACH);
 
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 		return ret;
 	}
 
@@ -294,7 +295,8 @@ static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf, struct dma_buf_attac
 						 HYPER_DMABUF_OPS_DETACH);
 
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -331,7 +333,8 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	kfree(page_info);
 
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return st;
@@ -363,7 +366,8 @@ static void hyper_dmabuf_ops_unmap(struct dma_buf_attachment *attachment,
 						HYPER_DMABUF_OPS_UNMAP);
 
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -403,7 +407,8 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 	}
 
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	/*
@@ -429,7 +434,8 @@ static int hyper_dmabuf_ops_begin_cpu_access(struct dma_buf *dmabuf, enum dma_da
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return ret;
@@ -448,7 +454,8 @@ static int hyper_dmabuf_ops_end_cpu_access(struct dma_buf *dmabuf, enum dma_data
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_END_CPU_ACCESS);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return 0;
@@ -467,7 +474,8 @@ static void *hyper_dmabuf_ops_kmap_atomic(struct dma_buf *dmabuf, unsigned long 
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KMAP_ATOMIC);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return NULL; /* for now NULL.. need to return the address of mapped region */
@@ -486,7 +494,8 @@ static void hyper_dmabuf_ops_kunmap_atomic(struct dma_buf *dmabuf, unsigned long
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KUNMAP_ATOMIC);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -503,7 +512,8 @@ static void *hyper_dmabuf_ops_kmap(struct dma_buf *dmabuf, unsigned long pgnum)
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KMAP);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return NULL; /* for now NULL.. need to return the address of mapped region */
@@ -522,7 +532,8 @@ static void hyper_dmabuf_ops_kunmap(struct dma_buf *dmabuf, unsigned long pgnum,
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_KUNMAP);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 
@@ -539,7 +550,8 @@ static int hyper_dmabuf_ops_mmap(struct dma_buf *dmabuf, struct vm_area_struct *
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_MMAP);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return ret;
@@ -558,7 +570,8 @@ static void *hyper_dmabuf_ops_vmap(struct dma_buf *dmabuf)
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_VMAP);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	return NULL;
@@ -577,7 +590,8 @@ static void hyper_dmabuf_ops_vunmap(struct dma_buf *dmabuf, void *vaddr)
 	ret = hyper_dmabuf_sync_request_and_wait(sgt_info->hyper_dmabuf_id,
 						HYPER_DMABUF_OPS_VUNMAP);
 	if (ret < 0) {
-		printk("hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_err(hyper_dmabuf_private.device,
+			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 }
 

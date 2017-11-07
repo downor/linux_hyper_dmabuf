@@ -41,7 +41,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	sgt_info = hyper_dmabuf_find_exported(id);
 
 	if (!sgt_info) {
-		printk("dmabuf remote sync::can't find exported list\n");
+		dev_err(hyper_dmabuf_private.device,
+			"dmabuf remote sync::can't find exported list\n");
 		return -EINVAL;
 	}
 
@@ -54,7 +55,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 		if (!attachl->attach) {
 			kfree(attachl);
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_ATTACH\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_ATTACH\n");
 			return -EINVAL;
 		}
 
@@ -63,8 +65,10 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 	case HYPER_DMABUF_OPS_DETACH:
 		if (list_empty(&sgt_info->active_attached->list)) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_DETACH\n");
-			printk("no more dmabuf attachment left to be detached\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_DETACH\n");
+			dev_err(hyper_dmabuf_private.device,
+				"no more dmabuf attachment left to be detached\n");
 			return -EINVAL;
 		}
 
@@ -78,8 +82,10 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 	case HYPER_DMABUF_OPS_MAP:
 		if (list_empty(&sgt_info->active_attached->list)) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_MAP\n");
-			printk("no more dmabuf attachment left to be detached\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_MAP\n");
+			dev_err(hyper_dmabuf_private.device,
+				"no more dmabuf attachment left to be detached\n");
 			return -EINVAL;
 		}
 
@@ -90,7 +96,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		sgtl->sgt = dma_buf_map_attachment(attachl->attach, DMA_BIDIRECTIONAL);
 		if (!sgtl->sgt) {
 			kfree(sgtl);
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_MAP\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_MAP\n");
 			return -EINVAL;
 		}
 		list_add(&sgtl->list, &sgt_info->active_sgts->list);
@@ -99,8 +106,10 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_UNMAP:
 		if (list_empty(&sgt_info->active_sgts->list) ||
 		    list_empty(&sgt_info->active_attached->list)) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_UNMAP\n");
-			printk("no more SGT or attachment left to be freed\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_UNMAP\n");
+			dev_err(hyper_dmabuf_private.device,
+				"no more SGT or attachment left to be freed\n");
 			return -EINVAL;
 		}
 
@@ -140,7 +149,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS:
 		ret = dma_buf_begin_cpu_access(sgt_info->dma_buf, DMA_BIDIRECTIONAL);
 		if (!ret) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS\n");
 			ret = -EINVAL;
 		}
 		break;
@@ -148,7 +158,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_END_CPU_ACCESS:
 		ret = dma_buf_end_cpu_access(sgt_info->dma_buf, DMA_BIDIRECTIONAL);
 		if (!ret) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_END_CPU_ACCESS\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_END_CPU_ACCESS\n");
 			ret = -EINVAL;
 		}
 		break;
@@ -165,7 +176,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 		if (!va_kmapl->vaddr) {
 			kfree(va_kmapl);
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KMAP(_ATOMIC)\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KMAP(_ATOMIC)\n");
 			return -EINVAL;
 		}
 		list_add(&va_kmapl->list, &sgt_info->va_kmapped->list);
@@ -174,15 +186,18 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_KUNMAP_ATOMIC:
 	case HYPER_DMABUF_OPS_KUNMAP:
 		if (list_empty(&sgt_info->va_kmapped->list)) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
-			printk("no more dmabuf VA to be freed\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
+			dev_err(hyper_dmabuf_private.device,
+				"no more dmabuf VA to be freed\n");
 			return -EINVAL;
 		}
 
 		va_kmapl = list_first_entry(&sgt_info->va_kmapped->list,
 					    struct kmap_vaddr_list, list);
 		if (va_kmapl->vaddr == NULL) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
 			return -EINVAL;
 		}
 
@@ -199,7 +214,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_MMAP:
 		/* currently not supported: looking for a way to create
 		 * a dummy vma */
-		printk("dmabuf remote sync::sychronized mmap is not supported\n");
+		dev_warn(hyper_dmabuf_private.device,
+			 "dmabuf remote sync::sychronized mmap is not supported\n");
 		break;
 
 	case HYPER_DMABUF_OPS_VMAP:
@@ -210,7 +226,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 		if (!va_vmapl->vaddr) {
 			kfree(va_vmapl);
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VMAP\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VMAP\n");
 			return -EINVAL;
 		}
 		list_add(&va_vmapl->list, &sgt_info->va_vmapped->list);
@@ -218,14 +235,17 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 	case HYPER_DMABUF_OPS_VUNMAP:
 		if (list_empty(&sgt_info->va_vmapped->list)) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VUNMAP\n");
-			printk("no more dmabuf VA to be freed\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VUNMAP\n");
+			dev_err(hyper_dmabuf_private.device,
+				"no more dmabuf VA to be freed\n");
 			return -EINVAL;
 		}
 		va_vmapl = list_first_entry(&sgt_info->va_vmapped->list,
 					struct vmap_vaddr_list, list);
 		if (!va_vmapl || va_vmapl->vaddr == NULL) {
-			printk("dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VUNMAP\n");
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VUNMAP\n");
 			return -EINVAL;
 		}
 

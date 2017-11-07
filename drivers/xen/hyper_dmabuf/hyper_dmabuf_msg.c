@@ -114,12 +114,12 @@ void cmd_process_work(struct work_struct *work)
 		imported_sgt_info->nents = req->operands[1];
 		imported_sgt_info->ref_handle = req->operands[4];
 
-		printk("DMABUF was exported\n");
-		printk("\thyper_dmabuf_id %d\n", req->operands[0]);
-		printk("\tnents %d\n", req->operands[1]);
-		printk("\tfirst offset %d\n", req->operands[2]);
-		printk("\tlast len %d\n", req->operands[3]);
-		printk("\tgrefid %d\n", req->operands[4]);
+		dev_dbg(hyper_dmabuf_private.device, "DMABUF was exported\n");
+		dev_dbg(hyper_dmabuf_private.device, "\thyper_dmabuf_id %d\n", req->operands[0]);
+		dev_dbg(hyper_dmabuf_private.device, "\tnents %d\n", req->operands[1]);
+		dev_dbg(hyper_dmabuf_private.device, "\tfirst offset %d\n", req->operands[2]);
+		dev_dbg(hyper_dmabuf_private.device, "\tlast len %d\n", req->operands[3]);
+		dev_dbg(hyper_dmabuf_private.device, "\tgrefid %d\n", req->operands[4]);
 
 		for (i=0; i<4; i++)
 			imported_sgt_info->private[i] = req->operands[5+i];
@@ -133,7 +133,8 @@ void cmd_process_work(struct work_struct *work)
 		sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
 
 		if (!sgt_info) {
-			printk("critical err: requested sgt_info can't be found %d\n", req->operands[0]);
+			dev_err(hyper_dmabuf_private.device,
+				"critical err: requested sgt_info can't be found %d\n", req->operands[0]);
 			break;
 		}
 
@@ -163,13 +164,13 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	int ret;
 
 	if (!req) {
-		printk("request is NULL\n");
+		dev_err(hyper_dmabuf_private.device, "request is NULL\n");
 		return -EINVAL;
 	}
 
 	if ((req->command < HYPER_DMABUF_EXPORT) ||
 		(req->command > HYPER_DMABUF_OPS_TO_SOURCE)) {
-		printk("invalid command\n");
+		dev_err(hyper_dmabuf_private.device, "invalid command\n");
 		return -EINVAL;
 	}
 
@@ -183,7 +184,8 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		/* command : HYPER_DMABUF_NOTIFY_UNEXPORT,
 		 * operands0 : hyper_dmabuf_id
 		 */
-
+		dev_dbg(hyper_dmabuf_private.device,
+			"%s: processing HYPER_DMABUF_NOTIFY_UNEXPORT\n", __func__);
 		sgt_info = hyper_dmabuf_find_imported(req->operands[0]);
 
 		if (sgt_info) {
@@ -216,6 +218,8 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		 * operands0 : hyper_dmabuf_id
 		 * operands1 : enum hyper_dmabuf_ops {....}
 		 */
+		dev_dbg(hyper_dmabuf_private.device,
+			"%s: HYPER_DMABUF_OPS_TO_SOURCE\n", __func__);
 		ret = hyper_dmabuf_remote_sync(req->operands[0], req->operands[1]);
 		if (ret)
 			req->status = HYPER_DMABUF_REQ_ERROR;
@@ -225,6 +229,8 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		return req->command;
 	}
 
+	dev_dbg(hyper_dmabuf_private.device,
+		"%s: putting request to workqueue\n", __func__);
 	temp_req = kmalloc(sizeof(*temp_req), GFP_KERNEL);
 
 	memcpy(temp_req, req, sizeof(*temp_req));
