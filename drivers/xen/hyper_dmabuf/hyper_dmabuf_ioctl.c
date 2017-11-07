@@ -11,22 +11,13 @@
 #include "hyper_dmabuf_imp.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_drv.h"
+#include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_query.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 #include "xen/hyper_dmabuf_xen_comm_list.h"
 #include "hyper_dmabuf_msg.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
-
-static uint32_t hyper_dmabuf_id_gen(void) {
-	/* TODO: add proper implementation */
-	static uint32_t id = 1000;
-	static int32_t domid = -1;
-	if (domid == -1) {
-		domid = hyper_dmabuf_get_domid();
-	}
-	return HYPER_DMABUF_ID_IMPORTER(domid, id++);
-}
 
 static int hyper_dmabuf_exporter_ring_setup(void *data)
 {
@@ -133,7 +124,7 @@ static int hyper_dmabuf_export_remote(void *data)
 
 	sgt_info = kmalloc(sizeof(*sgt_info), GFP_KERNEL);
 
-	sgt_info->hyper_dmabuf_id = hyper_dmabuf_id_gen();
+	sgt_info->hyper_dmabuf_id = hyper_dmabuf_get_id();
 	/* TODO: We might need to consider using port number on event channel? */
 	sgt_info->hyper_dmabuf_rdomain = export_remote_attr->remote_domain;
 	sgt_info->dma_buf = dma_buf;
@@ -334,6 +325,8 @@ static int hyper_dmabuf_unexport(void *data)
 		hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
 		hyper_dmabuf_remove_exported(unexport_attr->hyper_dmabuf_id);
 		kfree(sgt_info);
+		/* register hyper_dmabuf_id to the list for reuse */
+		store_reusable_id(unexport_attr->hyper_dmabuf_id);
 	}
 
 	return ret;

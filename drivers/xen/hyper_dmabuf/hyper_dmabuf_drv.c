@@ -5,6 +5,7 @@
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_conf.h"
 #include "hyper_dmabuf_list.h"
+#include "hyper_dmabuf_id.h"
 #include "xen/hyper_dmabuf_xen_comm_list.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 
@@ -66,6 +67,10 @@ static void hyper_dmabuf_drv_exit(void)
 	/* destroy workqueue */
 	if (hyper_dmabuf_private.work_queue)
 		destroy_workqueue(hyper_dmabuf_private.work_queue);
+
+	/* destroy id_queue */
+	if (hyper_dmabuf_private.id_queue)
+		destroy_reusable_list();
 
 	hyper_dmabuf_destroy_data_dir();
 	printk( KERN_NOTICE "dma_buf-src_sink model: Exiting" );

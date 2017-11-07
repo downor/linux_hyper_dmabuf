@@ -6,6 +6,7 @@
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_drv.h"
+#include "hyper_dmabuf_id.h"
 #include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_imp.h"
@@ -124,6 +125,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 			hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
 			hyper_dmabuf_remove_exported(id);
 			kfree(sgt_info);
+			/* store hyper_dmabuf_id in the list for reuse */
+			store_reusable_id(id);
 		}
 
 		break;

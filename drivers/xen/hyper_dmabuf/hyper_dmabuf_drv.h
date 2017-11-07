@@ -1,10 +1,16 @@
 #ifndef __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__
 #define __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__
 
+struct list_reusable_id {
+	int id;
+	struct list_head list;
+};
+
 struct hyper_dmabuf_private {
         struct device *device;
 	int domid;
 	struct workqueue_struct *work_queue;
+	struct list_reusable_id *id_queue;
 };
 
 typedef int (*hyper_dmabuf_ioctl_t)(void *data);
