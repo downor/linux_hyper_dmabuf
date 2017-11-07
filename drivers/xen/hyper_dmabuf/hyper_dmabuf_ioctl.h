@@ -90,6 +90,8 @@ struct ioctl_hyper_dmabuf_unexport {
 	/* IN parameters */
 	/* hyper dmabuf id to be unexported */
 	int hyper_dmabuf_id;
+	/* delay in ms by which unexport processing will be postponed */
+	int delay_ms;
 	/* OUT parameters */
 	/* Status of request */
 	int status;

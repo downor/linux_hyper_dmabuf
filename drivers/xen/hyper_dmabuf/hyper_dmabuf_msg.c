@@ -112,7 +112,6 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 
 void cmd_process_work(struct work_struct *work)
 {
-	struct hyper_dmabuf_sgt_info *sgt_info;
 	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
 	struct cmd_process *proc = container_of(work, struct cmd_process, work);
 	struct hyper_dmabuf_req *req;
@@ -154,19 +153,6 @@ void cmd_process_work(struct work_struct *work)
 		hyper_dmabuf_register_imported(imported_sgt_info);
 		break;
 
-	case HYPER_DMABUF_FIRST_EXPORT:
-		/* find a corresponding SGT for the id */
-		sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
-
-		if (!sgt_info) {
-			dev_err(hyper_dmabuf_private.device,
-				"critical err: requested sgt_info can't be found %d\n", req->operands[0]);
-			break;
-		}
-
-		sgt_info->importer_exported++;
-		break;
-
 	case HYPER_DMABUF_OPS_TO_REMOTE:
 		/* notifying dmabuf map/unmap to importer (probably not needed) */
 		/* for dmabuf synchronization */
@@ -187,6 +173,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	struct cmd_process *proc;
 	struct hyper_dmabuf_req *temp_req;
 	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct hyper_dmabuf_sgt_info *exp_sgt_info;
 	int ret;
 
 	if (!req) {
@@ -216,8 +203,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 
 		if (sgt_info) {
 			/* if anything is still using dma_buf */
-			if (sgt_info->dma_buf &&
-			    dmabuf_refcount(sgt_info->dma_buf) > 0) {
+			if (sgt_info->num_importers) {
 				/*
 				 * Buffer is still in  use, just mark that it should
 				 * not be allowed to export its fd anymore.
@@ -254,6 +240,29 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 
 		return req->command;
 	}
+
+	/* synchronous dma_buf_fd export */
+	if (req->command == HYPER_DMABUF_FIRST_EXPORT) {
+		/* find a corresponding SGT for the id */
+		exp_sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
+
+		if (!exp_sgt_info) {
+			dev_err(hyper_dmabuf_private.device,
+				"critical err: requested sgt_info can't be found %d\n", req->operands[0]);
+			req->status = HYPER_DMABUF_REQ_ERROR;
+		} else if (!exp_sgt_info->valid) {
+			dev_dbg(hyper_dmabuf_private.device,
+				"Buffer no longer valid - cannot export\n");
+			req->status = HYPER_DMABUF_REQ_ERROR;
+		} else {
+			dev_dbg(hyper_dmabuf_private.device,
+				"Buffer still valid - can export\n");
+			exp_sgt_info->importer_exported++;
+			req->status = HYPER_DMABUF_REQ_PROCESSED;
+		}
+		return req->command;
+	}
+
 
 	dev_dbg(hyper_dmabuf_private.device,
 		"%s: putting request to workqueue\n", __func__);

@@ -78,6 +78,8 @@ struct hyper_dmabuf_sgt_info {
 	bool valid;
 	int importer_exported; /* exported locally on importer's side */
 	void *refs_info; /* hypervisor-specific info for the references */
+	struct delayed_work unexport_work;
+	bool unexport_scheduled;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
 

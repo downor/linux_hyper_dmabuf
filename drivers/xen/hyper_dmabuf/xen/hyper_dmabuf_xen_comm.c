@@ -551,6 +551,8 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 			dev_err(hyper_dmabuf_private.device, "request timed-out\n");
 			return -EBUSY;
 		}
+
+		return req_pending.status;
 	}
 
 	return 0;
