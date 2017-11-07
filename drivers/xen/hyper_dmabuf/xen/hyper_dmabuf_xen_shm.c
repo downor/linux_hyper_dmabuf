@@ -184,8 +184,10 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 	struct gnttab_map_grant_ref *data_map_ops;
 	struct gnttab_unmap_grant_ref *data_unmap_ops;
 
-	int nents_last = nents % REFS_PER_PAGE;
-	int n_lvl2_grefs = (nents / REFS_PER_PAGE) + ((nents_last > 0) ? 1 : 0);
+	/* # of grefs in the last page of lvl2 table */
+	int nents_last = (nents - 1) % REFS_PER_PAGE + 1;
+	int n_lvl2_grefs = (nents / REFS_PER_PAGE) + ((nents_last > 0) ? 1 : 0) -
+			   (nents_last == REFS_PER_PAGE);
 	int i, j, k;
 
 	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
@@ -270,7 +272,7 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 
 	k = 0;
 
-	for (i = 0; i < (nents_last ? n_lvl2_grefs - 1 : n_lvl2_grefs); i++) {
+	for (i = 0; i < n_lvl2_grefs - 1; i++) {
 		lvl2_table = pfn_to_kaddr(page_to_pfn(lvl2_table_pages[i]));
 		for (j = 0; j < REFS_PER_PAGE; j++) {
 			gnttab_set_map_op(&data_map_ops[k],
