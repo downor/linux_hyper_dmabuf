@@ -5,9 +5,9 @@
 #include <linux/dma-buf.h>
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_list.h"
+#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_id.h"
-#include "xen/hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_imp.h"
 
@@ -133,6 +133,8 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 	case HYPER_DMABUF_OPS_RELEASE:
 		/* place holder */
+                sgt_info->importer_exported--;
+
 		break;
 
 	case HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS:

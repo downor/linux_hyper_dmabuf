@@ -3,27 +3,14 @@
 
 #include "xen/interface/io/ring.h"
 #include "xen/xenbus.h"
+#include "../hyper_dmabuf_msg.h"
 
 #define MAX_NUMBER_OF_OPERANDS 9
 
-struct hyper_dmabuf_ring_rq {
-        unsigned int request_id;
-        unsigned int status;
-        unsigned int command;
-        unsigned int operands[MAX_NUMBER_OF_OPERANDS];
-};
+DEFINE_RING_TYPES(xen_comm, struct hyper_dmabuf_req, struct hyper_dmabuf_resp);
 
-struct hyper_dmabuf_ring_rp {
-        unsigned int response_id;
-        unsigned int status;
-        unsigned int command;
-        unsigned int operands[MAX_NUMBER_OF_OPERANDS];
-};
-
-DEFINE_RING_TYPES(hyper_dmabuf, struct hyper_dmabuf_ring_rq, struct hyper_dmabuf_ring_rp);
-
-struct hyper_dmabuf_ring_info_export {
-        struct hyper_dmabuf_front_ring ring_front;
+struct xen_comm_tx_ring_info {
+        struct xen_comm_front_ring ring_front;
 	int rdomain;
         int gref_ring;
         int irq;
@@ -31,39 +18,35 @@ struct hyper_dmabuf_ring_info_export {
 	struct xenbus_watch watch;
 };
 
-struct hyper_dmabuf_ring_info_import {
+struct xen_comm_rx_ring_info {
         int sdomain;
         int irq;
         int evtchn;
-        struct hyper_dmabuf_back_ring ring_back;
+        struct xen_comm_back_ring ring_back;
 	struct gnttab_unmap_grant_ref unmap_op;
 };
 
-int32_t hyper_dmabuf_get_domid(void);
-int32_t hyper_dmabuf_setup_data_dir(void);
-int32_t hyper_dmabuf_destroy_data_dir(void);
+int hyper_dmabuf_get_domid(void);
 
-int hyper_dmabuf_next_req_id_export(void);
+int hyper_dmabuf_xen_init_comm_env(void);
 
 /* exporter needs to generated info for page sharing */
-int hyper_dmabuf_exporter_ringbuf_init(int rdomain);
+int hyper_dmabuf_xen_init_tx_rbuf(int domid);
 
-/* importer needs to know about shared page and port numbers for ring buffer and event channel */
-int hyper_dmabuf_importer_ringbuf_init(int sdomain);
+/* importer needs to know about shared page and port numbers
+ * for ring buffer and event channel
+ */
+int hyper_dmabuf_xen_init_rx_rbuf(int domid);
 
 /* cleans up exporter ring created for given domain */
-void hyper_dmabuf_exporter_ringbuf_cleanup(int rdomain);
+void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid);
 
 /* cleans up importer ring created for given domain */
-void hyper_dmabuf_importer_ringbuf_cleanup(int sdomain);
+void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid);
 
-/* cleans up all exporter/importer rings */
-void hyper_dmabuf_cleanup_ringbufs(void);
+void hyper_dmabuf_xen_destroy_comm(void);
 
 /* send request to the remote domain */
-int hyper_dmabuf_send_request(int domain, struct hyper_dmabuf_ring_rq *req, int wait);
-
-/* called by interrupt (WORKQUEUE) */
-int hyper_dmabuf_send_response(struct hyper_dmabuf_ring_rp* response, int domain);
+int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait);
 
 #endif // __HYPER_DMABUF_XEN_COMM_H__

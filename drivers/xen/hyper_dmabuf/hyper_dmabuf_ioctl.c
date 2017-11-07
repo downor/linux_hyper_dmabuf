@@ -8,47 +8,37 @@
 #include <linux/delay.h>
 #include <linux/list.h>
 #include "hyper_dmabuf_struct.h"
-#include "hyper_dmabuf_imp.h"
+#include "hyper_dmabuf_ioctl.h"
 #include "hyper_dmabuf_list.h"
+#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_id.h"
+#include "hyper_dmabuf_imp.h"
 #include "hyper_dmabuf_query.h"
-#include "xen/hyper_dmabuf_xen_comm.h"
-#include "xen/hyper_dmabuf_xen_comm_list.h"
-#include "hyper_dmabuf_msg.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
-static int hyper_dmabuf_exporter_ring_setup(void *data)
+static int hyper_dmabuf_tx_ch_setup(void *data)
 {
-	struct ioctl_hyper_dmabuf_exporter_ring_setup *ring_attr;
-	struct hyper_dmabuf_ring_info_export *ring_info;
+	struct ioctl_hyper_dmabuf_tx_ch_setup *tx_ch_attr;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	int ret = 0;
 
 	if (!data) {
 		printk("user data is NULL\n");
 		return -1;
 	}
-	ring_attr = (struct ioctl_hyper_dmabuf_exporter_ring_setup *)data;
+	tx_ch_attr = (struct ioctl_hyper_dmabuf_tx_ch_setup *)data;
 
-	/* check if the ring ch already exists */
-	ring_info = hyper_dmabuf_find_exporter_ring(ring_attr->remote_domain);
-
-	if (ring_info) {
-		printk("(exporter's) ring ch to domid = %d already exist\ngref = %d, port = %d\n",
-			ring_info->rdomain, ring_info->gref_ring, ring_info->port);
-		return 0;
-	}
-
-	ret = hyper_dmabuf_exporter_ringbuf_init(ring_attr->remote_domain);
+	ret = ops->init_tx_ch(tx_ch_attr->remote_domain);
 
 	return ret;
 }
 
-static int hyper_dmabuf_importer_ring_setup(void *data)
+static int hyper_dmabuf_rx_ch_setup(void *data)
 {
-	struct ioctl_hyper_dmabuf_importer_ring_setup *setup_imp_ring_attr;
-	struct hyper_dmabuf_ring_info_import *ring_info;
+	struct ioctl_hyper_dmabuf_rx_ch_setup *rx_ch_attr;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	int ret = 0;
 
 	if (!data) {
@@ -56,17 +46,9 @@ static int hyper_dmabuf_importer_ring_setup(void *data)
 		return -1;
 	}
 
-	setup_imp_ring_attr = (struct ioctl_hyper_dmabuf_importer_ring_setup *)data;
+	rx_ch_attr = (struct ioctl_hyper_dmabuf_rx_ch_setup *)data;
 
-	/* check if the ring ch already exist */
-	ring_info = hyper_dmabuf_find_importer_ring(setup_imp_ring_attr->source_domain);
-
-	if (ring_info) {
-		printk("(importer's) ring ch to domid = %d already exist\n", ring_info->sdomain);
-		return 0;
-	}
-
-	ret = hyper_dmabuf_importer_ringbuf_init(setup_imp_ring_attr->source_domain);
+	ret = ops->init_rx_ch(rx_ch_attr->source_domain);
 
 	return ret;
 }
@@ -74,13 +56,14 @@ static int hyper_dmabuf_importer_ring_setup(void *data)
 static int hyper_dmabuf_export_remote(void *data)
 {
 	struct ioctl_hyper_dmabuf_export_remote *export_remote_attr;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	struct dma_buf *dma_buf;
 	struct dma_buf_attachment *attachment;
 	struct sg_table *sgt;
 	struct hyper_dmabuf_pages_info *page_info;
 	struct hyper_dmabuf_sgt_info *sgt_info;
-	struct hyper_dmabuf_ring_rq *req;
-	int operands[9];
+	struct hyper_dmabuf_req *req;
+	int operands[MAX_NUMBER_OF_OPERANDS];
 	int ret = 0;
 
 	if (!data) {
@@ -125,6 +108,7 @@ static int hyper_dmabuf_export_remote(void *data)
 	sgt_info = kmalloc(sizeof(*sgt_info), GFP_KERNEL);
 
 	sgt_info->hyper_dmabuf_id = hyper_dmabuf_get_id();
+
 	/* TODO: We might need to consider using port number on event channel? */
 	sgt_info->hyper_dmabuf_rdomain = export_remote_attr->remote_domain;
 	sgt_info->dma_buf = dma_buf;
@@ -163,15 +147,14 @@ static int hyper_dmabuf_export_remote(void *data)
 
 	export_remote_attr->hyper_dmabuf_id = sgt_info->hyper_dmabuf_id;
 
-	/* now create table of grefs for shared pages and */
-
 	/* now create request for importer via ring */
 	operands[0] = page_info->hyper_dmabuf_id;
 	operands[1] = page_info->nents;
 	operands[2] = page_info->frst_ofst;
 	operands[3] = page_info->last_len;
-	operands[4] = hyper_dmabuf_create_gref_table(page_info->pages, export_remote_attr->remote_domain,
-						     page_info->nents, &sgt_info->shared_pages_info);
+	operands[4] = ops->share_pages (page_info->pages, export_remote_attr->remote_domain,
+					page_info->nents, &sgt_info->refs_info);
+
 	/* driver/application specific private info, max 32 bytes */
 	operands[5] = export_remote_attr->private[0];
 	operands[6] = export_remote_attr->private[1];
@@ -182,7 +165,8 @@ static int hyper_dmabuf_export_remote(void *data)
 
 	/* composing a message to the importer */
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT, &operands[0]);
-	if(hyper_dmabuf_send_request(export_remote_attr->remote_domain, req, false))
+
+	if(ops->send_req(export_remote_attr->remote_domain, req, false))
 		goto fail_send_request;
 
 	/* free msg */
@@ -215,8 +199,10 @@ fail_export:
 static int hyper_dmabuf_export_fd_ioctl(void *data)
 {
 	struct ioctl_hyper_dmabuf_export_fd *export_fd_attr;
-	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
-	struct hyper_dmabuf_ring_rq *req;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
+	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct hyper_dmabuf_req *req;
+	struct page **data_pages;
 	int operand;
 	int ret = 0;
 
@@ -228,43 +214,48 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	export_fd_attr = (struct ioctl_hyper_dmabuf_export_fd *)data;
 
 	/* look for dmabuf for the id */
-	imported_sgt_info = hyper_dmabuf_find_imported(export_fd_attr->hyper_dmabuf_id);
-	if (imported_sgt_info == NULL) /* can't find sgt from the table */
+	sgt_info = hyper_dmabuf_find_imported(export_fd_attr->hyper_dmabuf_id);
+	if (sgt_info == NULL) /* can't find sgt from the table */
 		return -1;
 
 	printk("%s Found buffer gref %d  off %d last len %d nents %d domain %d\n", __func__,
-		imported_sgt_info->gref, imported_sgt_info->frst_ofst,
-		imported_sgt_info->last_len, imported_sgt_info->nents,
-		HYPER_DMABUF_DOM_ID(imported_sgt_info->hyper_dmabuf_id));
+		sgt_info->ref_handle, sgt_info->frst_ofst,
+		sgt_info->last_len, sgt_info->nents,
+		HYPER_DMABUF_DOM_ID(sgt_info->hyper_dmabuf_id));
 
-	if (!imported_sgt_info->sgt) {
-		imported_sgt_info->sgt = hyper_dmabuf_map_pages(imported_sgt_info->gref,
-							imported_sgt_info->frst_ofst,
-							imported_sgt_info->last_len,
-							imported_sgt_info->nents,
-							HYPER_DMABUF_DOM_ID(imported_sgt_info->hyper_dmabuf_id),
-							&imported_sgt_info->shared_pages_info);
+	if (!sgt_info->sgt) {
+		data_pages = ops->map_shared_pages(sgt_info->ref_handle,
+						   HYPER_DMABUF_DOM_ID(sgt_info->hyper_dmabuf_id),
+						   sgt_info->nents,
+						   &sgt_info->refs_info);
 
-		/* send notifiticatio for first export_fd to exporter */
-		operand = imported_sgt_info->hyper_dmabuf_id;
-		req = kcalloc(1, sizeof(*req), GFP_KERNEL);
-		hyper_dmabuf_create_request(req, HYPER_DMABUF_FIRST_EXPORT, &operand);
+		sgt_info->sgt = hyper_dmabuf_create_sgt(data_pages, sgt_info->frst_ofst,
+							sgt_info->last_len, sgt_info->nents);
 
-		ret = hyper_dmabuf_send_request(HYPER_DMABUF_DOM_ID(operand), req, false);
-
-		if (!imported_sgt_info->sgt || ret) {
-			kfree(req);
-			printk("Failed to create sgt or notify exporter\n");
-			return -EINVAL;
-		}
-		kfree(req);
 	}
 
-	export_fd_attr->fd = hyper_dmabuf_export_fd(imported_sgt_info, export_fd_attr->flags);
+	/* send notification for export_fd to exporter */
+	operand = sgt_info->hyper_dmabuf_id;
+
+	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_FIRST_EXPORT, &operand);
+
+	ret = ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, false);
+
+	if (!sgt_info->sgt || ret) {
+		kfree(req);
+		printk("Failed to create sgt or notify exporter\n");
+		return -EINVAL;
+	}
+	kfree(req);
+
+	export_fd_attr->fd = hyper_dmabuf_export_fd(sgt_info, export_fd_attr->flags);
 
 	if (export_fd_attr->fd < 0) {
 		/* fail to get fd */
 		ret = export_fd_attr->fd;
+	} else {
+		sgt_info->num_importers++;
 	}
 
 	return ret;
@@ -276,8 +267,9 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 static int hyper_dmabuf_unexport(void *data)
 {
 	struct ioctl_hyper_dmabuf_unexport *unexport_attr;
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	struct hyper_dmabuf_sgt_info *sgt_info;
-	struct hyper_dmabuf_ring_rq *req;
+	struct hyper_dmabuf_req *req;
 	int ret;
 
 	if (!data) {
@@ -301,7 +293,7 @@ static int hyper_dmabuf_unexport(void *data)
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &unexport_attr->hyper_dmabuf_id);
 
 	/* Now send unexport request to remote domain, marking that buffer should not be used anymore */
-	ret = hyper_dmabuf_send_request(sgt_info->hyper_dmabuf_rdomain, req, true);
+	ret = ops->send_req(sgt_info->hyper_dmabuf_rdomain, req, true);
 	if (ret < 0) {
 		kfree(req);
 		return -EFAULT;
@@ -405,8 +397,8 @@ static int hyper_dmabuf_query(void *data)
 }
 
 static const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORTER_RING_SETUP, hyper_dmabuf_exporter_ring_setup, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_IMPORTER_RING_SETUP, hyper_dmabuf_importer_ring_setup, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_TX_CH_SETUP, hyper_dmabuf_tx_ch_setup, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_RX_CH_SETUP, hyper_dmabuf_rx_ch_setup, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_REMOTE, hyper_dmabuf_export_remote, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_FD, hyper_dmabuf_export_fd_ioctl, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_UNEXPORT, hyper_dmabuf_unexport, 0),
