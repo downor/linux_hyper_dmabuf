@@ -31,7 +31,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/miscdevice.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/dma-buf.h>
 #include <linux/delay.h>
 #include <linux/list.h>
@@ -242,6 +242,10 @@ reexport:
 	operands[6] = page_info->last_len;
 	operands[7] = ops->share_pages (page_info->pages, export_remote_attr->remote_domain,
 					page_info->nents, &sgt_info->refs_info);
+	if (operands[7] < 0) {
+		dev_err(hyper_dmabuf_private.device, "pages sharing failed\n");
+		goto fail_map_req;
+	}
 
 	/* driver/application specific private info, max 4x4 bytes */
 	operands[8] = export_remote_attr->private[0];
