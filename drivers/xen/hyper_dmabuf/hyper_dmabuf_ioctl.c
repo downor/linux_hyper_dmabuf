@@ -82,17 +82,64 @@ static int hyper_dmabuf_rx_ch_setup_ioctl(struct file *filp, void *data)
 	return ret;
 }
 
+static int hyper_dmabuf_send_export_msg(struct hyper_dmabuf_sgt_info *sgt_info,
+					struct hyper_dmabuf_pages_info *page_info)
+{
+	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
+	struct hyper_dmabuf_req *req;
+	int operands[12] = {0};
+	int ret, i;
+
+	/* now create request for importer via ring */
+	operands[0] = sgt_info->hid.id;
+
+	for (i=0; i<3; i++)
+		operands[i+1] = sgt_info->hid.rng_key[i];
+
+	if (page_info) {
+		operands[4] = page_info->nents;
+		operands[5] = page_info->frst_ofst;
+		operands[6] = page_info->last_len;
+		operands[7] = ops->share_pages (page_info->pages, sgt_info->hyper_dmabuf_rdomain,
+						page_info->nents, &sgt_info->refs_info);
+		if (operands[7] < 0) {
+			dev_err(hyper_dmabuf_private.device, "pages sharing failed\n");
+			return -1;
+		}
+	}
+
+	/* driver/application specific private info, max 4x4 bytes */
+	memcpy(&operands[8], &sgt_info->priv[0], sizeof(unsigned int) * 4);
+
+	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+
+	if(!req) {
+		dev_err(hyper_dmabuf_private.device, "no more space left\n");
+		return -1;
+	}
+
+	/* composing a message to the importer */
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT, &operands[0]);
+
+	ret = ops->send_req(sgt_info->hyper_dmabuf_rdomain, req, false);
+
+	if(ret) {
+		dev_err(hyper_dmabuf_private.device, "error while communicating\n");
+	}
+
+	kfree(req);
+
+	return ret;
+}
+
 static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_export_remote *export_remote_attr;
-	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	struct dma_buf *dma_buf;
 	struct dma_buf_attachment *attachment;
 	struct sg_table *sgt;
 	struct hyper_dmabuf_pages_info *page_info;
 	struct hyper_dmabuf_sgt_info *sgt_info;
-	struct hyper_dmabuf_req *req;
-	int operands[MAX_NUMBER_OF_OPERANDS];
 	hyper_dmabuf_id_t hid;
 	int i;
 	int ret = 0;
@@ -138,6 +185,13 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 					}
 					sgt_info->unexport_scheduled = 0;
 				}
+
+				/* update private data in sgt_info with new ones */
+				memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 4);
+
+				/* TODO: need to send this private info to the importer so that those
+				 * on importer's side are also updated */
+
 				dma_buf_put(dma_buf);
 				export_remote_attr->hid = hid;
 				return 0;
@@ -225,6 +279,9 @@ reexport:
 	INIT_LIST_HEAD(&sgt_info->va_kmapped->list);
 	INIT_LIST_HEAD(&sgt_info->va_vmapped->list);
 
+	/* copy private data to sgt_info */
+	memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 4);
+
 	page_info = hyper_dmabuf_ext_pgs(sgt);
 	if (!page_info) {
 		dev_err(hyper_dmabuf_private.device, "failed to construct page_info\n");
@@ -236,52 +293,14 @@ reexport:
 	/* now register it to export list */
 	hyper_dmabuf_register_exported(sgt_info);
 
-	page_info->hyper_dmabuf_rdomain = sgt_info->hyper_dmabuf_rdomain;
-	page_info->hid = sgt_info->hid; /* may not be needed */
-
 	export_remote_attr->hid = sgt_info->hid;
 
-	/* now create request for importer via ring */
-	operands[0] = page_info->hid.id;
+	ret = hyper_dmabuf_send_export_msg(sgt_info, page_info);
 
-	for (i=0; i<3; i++)
-		operands[i+1] = page_info->hid.rng_key[i];
-
-	operands[4] = page_info->nents;
-	operands[5] = page_info->frst_ofst;
-	operands[6] = page_info->last_len;
-	operands[7] = ops->share_pages (page_info->pages, export_remote_attr->remote_domain,
-					page_info->nents, &sgt_info->refs_info);
-	if (operands[7] < 0) {
-		dev_err(hyper_dmabuf_private.device, "pages sharing failed\n");
-		goto fail_map_req;
-	}
-
-	/* driver/application specific private info, max 4x4 bytes */
-	operands[8] = export_remote_attr->priv[0];
-	operands[9] = export_remote_attr->priv[1];
-	operands[10] = export_remote_attr->priv[2];
-	operands[11] = export_remote_attr->priv[3];
-
-	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
-
-	if(!req) {
-		dev_err(hyper_dmabuf_private.device, "no more space left\n");
-		goto fail_map_req;
-	}
-
-	/* composing a message to the importer */
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT, &operands[0]);
-
-	ret = ops->send_req(export_remote_attr->remote_domain, req, false);
-
-	if(ret) {
-		dev_err(hyper_dmabuf_private.device, "error while communicating\n");
+	if (ret < 0) {
+		dev_err(hyper_dmabuf_private.device, "failed to send out the export request\n");
 		goto fail_send_request;
 	}
-
-	/* free msg */
-	kfree(req);
 
 	/* free page_info */
 	kfree(page_info->pages);
@@ -294,9 +313,6 @@ reexport:
 /* Clean-up if error occurs */
 
 fail_send_request:
-	kfree(req);
-
-fail_map_req:
 	hyper_dmabuf_remove_exported(sgt_info->hid);
 
 	/* free page_info */
