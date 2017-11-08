@@ -671,9 +671,8 @@ static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
 		/* query for exported dmabuf */
 		sgt_info = hyper_dmabuf_find_exported(query_attr->hid);
 		if (sgt_info) {
-			ret = hyper_dmabuf_query_exported(sgt_info, query_attr->item);
-			if (ret != -EINVAL)
-				query_attr->info = ret;
+			ret = hyper_dmabuf_query_exported(sgt_info,
+							  query_attr->item, &query_attr->info);
 		} else {
 			dev_err(hyper_dmabuf_private.device,
 				"DMA BUF {id:%d key:%d %d %d} can't be found in the export list\n",
@@ -685,9 +684,8 @@ static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
 		/* query for imported dmabuf */
 		imported_sgt_info = hyper_dmabuf_find_imported(query_attr->hid);
 		if (imported_sgt_info) {
-			ret = hyper_dmabuf_query_imported(imported_sgt_info, query_attr->item);
-			if (ret != -EINVAL)
-				query_attr->info = ret;
+			ret = hyper_dmabuf_query_imported(imported_sgt_info,
+							  query_attr->item, &query_attr->info);
 		} else {
 			dev_err(hyper_dmabuf_private.device,
 				"DMA BUF {id:%d key:%d %d %d} can't be found in the imported list\n",
@@ -697,7 +695,7 @@ static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
 		}
 	}
 
-	return 0;
+	return ret;
 }
 
 void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_info,

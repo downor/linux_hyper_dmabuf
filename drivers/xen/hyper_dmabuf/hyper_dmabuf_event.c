@@ -104,6 +104,12 @@ int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 
 	e = kzalloc(sizeof(*e), GFP_KERNEL);
 
+	if (!e) {
+		dev_err(hyper_dmabuf_private.device,
+			"no space left\n");
+		return -ENOMEM;
+	}
+
 	e->event_data.hdr.event_type = HYPER_DMABUF_NEW_IMPORT;
 	e->event_data.hdr.hid = hid;
 	e->event_data.data = (void*)imported_sgt_info->priv;

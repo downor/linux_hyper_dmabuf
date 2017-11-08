@@ -27,6 +27,7 @@
  */
 
 #include <linux/dma-buf.h>
+#include <linux/uaccess.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_id.h"
@@ -36,56 +37,91 @@ extern struct hyper_dmabuf_private hyper_dmabuf_private;
 #define HYPER_DMABUF_SIZE(nents, first_offset, last_len) \
 	((nents)*PAGE_SIZE - (first_offset) - PAGE_SIZE + (last_len))
 
-int hyper_dmabuf_query_exported(struct hyper_dmabuf_sgt_info *sgt_info, int query)
+int hyper_dmabuf_query_exported(struct hyper_dmabuf_sgt_info *sgt_info,
+				int query, unsigned long* info)
 {
+	int n;
+
 	switch (query)
 	{
 		case HYPER_DMABUF_QUERY_TYPE:
-			return EXPORTED;
+			*info = EXPORTED;
+			break;
 
 		/* exporting domain of this specific dmabuf*/
 		case HYPER_DMABUF_QUERY_EXPORTER:
-			return HYPER_DMABUF_DOM_ID(sgt_info->hid);
+			*info = HYPER_DMABUF_DOM_ID(sgt_info->hid);
+			break;
 
 		/* importing domain of this specific dmabuf */
 		case HYPER_DMABUF_QUERY_IMPORTER:
-			return sgt_info->hyper_dmabuf_rdomain;
+			*info = sgt_info->hyper_dmabuf_rdomain;
+			break;
 
 		/* size of dmabuf in byte */
 		case HYPER_DMABUF_QUERY_SIZE:
-			return sgt_info->dma_buf->size;
+			*info = sgt_info->dma_buf->size;
+			break;
 
 		/* whether the buffer is used by importer */
 		case HYPER_DMABUF_QUERY_BUSY:
-			return (sgt_info->importer_exported == 0) ? false : true;
+			*info = (sgt_info->importer_exported == 0) ? false : true;
+			break;
 
 		/* whether the buffer is unexported */
 		case HYPER_DMABUF_QUERY_UNEXPORTED:
-			return !sgt_info->valid;
+			*info = !sgt_info->valid;
+			break;
 
 		/* whether the buffer is scheduled to be unexported */
 		case HYPER_DMABUF_QUERY_DELAYED_UNEXPORTED:
-			return !sgt_info->unexport_scheduled;
+			*info = !sgt_info->unexport_scheduled;
+			break;
+
+		/* size of private info attached to buffer */
+		case HYPER_DMABUF_QUERY_PRIV_INFO_SIZE:
+			*info = sgt_info->sz_priv;
+			break;
+
+		/* copy private info attached to buffer */
+		case HYPER_DMABUF_QUERY_PRIV_INFO:
+			if (sgt_info->sz_priv > 0) {
+				n = copy_to_user((void __user*) *info,
+						sgt_info->priv,
+						sgt_info->sz_priv);
+				if (n != 0)
+					return -EINVAL;
+			}
+			break;
+
+		default:
+			return -EINVAL;
 	}
 
-	return -EINVAL;
+	return 0;
 }
 
 
-int hyper_dmabuf_query_imported(struct hyper_dmabuf_imported_sgt_info *imported_sgt_info, int query)
+int hyper_dmabuf_query_imported(struct hyper_dmabuf_imported_sgt_info *imported_sgt_info,
+				int query, unsigned long *info)
 {
+	int n;
+
 	switch (query)
 	{
 		case HYPER_DMABUF_QUERY_TYPE:
-			return IMPORTED;
+			*info = IMPORTED;
+			break;
 
 		/* exporting domain of this specific dmabuf*/
 		case HYPER_DMABUF_QUERY_EXPORTER:
-			return HYPER_DMABUF_DOM_ID(imported_sgt_info->hid);
+			*info = HYPER_DMABUF_DOM_ID(imported_sgt_info->hid);
+			break;
 
 		/* importing domain of this specific dmabuf */
 		case HYPER_DMABUF_QUERY_IMPORTER:
-			return  hyper_dmabuf_private.domid;
+			*info = hyper_dmabuf_private.domid;
+			break;
 
 		/* size of dmabuf in byte */
 		case HYPER_DMABUF_QUERY_SIZE:
@@ -93,23 +129,44 @@ int hyper_dmabuf_query_imported(struct hyper_dmabuf_imported_sgt_info *imported_
 				/* if local dma_buf is created (if it's ever mapped),
 				 * retrieve it directly from struct dma_buf *
 				 */
-				return imported_sgt_info->dma_buf->size;
+				*info = imported_sgt_info->dma_buf->size;
 			} else {
 				/* calcuate it from given nents, frst_ofst and last_len */
-				return HYPER_DMABUF_SIZE(imported_sgt_info->nents,
-							 imported_sgt_info->frst_ofst,
-							 imported_sgt_info->last_len);
+				*info = HYPER_DMABUF_SIZE(imported_sgt_info->nents,
+							  imported_sgt_info->frst_ofst,
+							  imported_sgt_info->last_len);
 			}
+			break;
 
 		/* whether the buffer is used or not */
 		case HYPER_DMABUF_QUERY_BUSY:
 			/* checks if it's used by importer */
-			return (imported_sgt_info->num_importers > 0) ? true : false;
+			*info = (imported_sgt_info->num_importers > 0) ? true : false;
+			break;
 
 		/* whether the buffer is unexported */
 		case HYPER_DMABUF_QUERY_UNEXPORTED:
-			return !imported_sgt_info->valid;
+			*info = !imported_sgt_info->valid;
+			break;
+		/* size of private info attached to buffer */
+		case HYPER_DMABUF_QUERY_PRIV_INFO_SIZE:
+			*info = imported_sgt_info->sz_priv;
+			break;
+
+		/* copy private info attached to buffer */
+		case HYPER_DMABUF_QUERY_PRIV_INFO:
+			if (imported_sgt_info->sz_priv > 0) {
+				n = copy_to_user((void __user*) *info,
+						imported_sgt_info->priv,
+						imported_sgt_info->sz_priv);
+				if (n != 0)
+					return -EINVAL;
+			}
+			break;
+
+		default:
+			return -EINVAL;
 	}
 
-	return -EINVAL;
+	return 0;
 }
