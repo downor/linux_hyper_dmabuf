@@ -109,6 +109,16 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 		lvl2_table[i] = gnttab_grant_foreign_access(domid,
 							    pfn_to_mfn(page_to_pfn(pages[i])),
 							    true /* read-only from remote domain */);
+		if (lvl2_table[i] == -ENOSPC) {
+			dev_err(hyper_dmabuf_private.device, "No more space left in grant table\n");
+
+			/* Unshare all already shared pages for lvl2 */
+			while(i--) {
+				gnttab_end_foreign_access_ref(lvl2_table[i], 0);
+				gnttab_free_grant_reference(lvl2_table[i]);
+			}
+			goto err_cleanup;
+		}
 	}
 
 	/* Share 2nd level addressing pages in readonly mode*/
@@ -116,6 +126,23 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 		lvl3_table[i] = gnttab_grant_foreign_access(domid,
 							    virt_to_mfn((unsigned long)lvl2_table+i*PAGE_SIZE ),
 							    true);
+		if (lvl3_table[i] == -ENOSPC) {
+			dev_err(hyper_dmabuf_private.device, "No more space left in grant table\n");
+
+			/* Unshare all already shared pages for lvl3 */
+			while(i--) {
+				gnttab_end_foreign_access_ref(lvl3_table[i], 1);
+				gnttab_free_grant_reference(lvl3_table[i]);
+			}
+
+			/* Unshare all pages for lvl2 */
+			while(nents--) {
+				gnttab_end_foreign_access_ref(lvl2_table[nents], 0);
+				gnttab_free_grant_reference(lvl2_table[nents]);
+			}
+
+			goto err_cleanup;
+		}
 	}
 
 	/* Share lvl3_table in readonly mode*/
@@ -123,6 +150,23 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 						virt_to_mfn((unsigned long)lvl3_table),
 						true);
 
+	if (lvl3_gref == -ENOSPC) {
+		dev_err(hyper_dmabuf_private.device, "No more space left in grant table\n");
+
+		/* Unshare all pages for lvl3 */
+		while(i--) {
+			gnttab_end_foreign_access_ref(lvl3_table[i], 1);
+			gnttab_free_grant_reference(lvl3_table[i]);
+		}
+
+		/* Unshare all pages for lvl2 */
+		while(nents--) {
+			gnttab_end_foreign_access_ref(lvl2_table[nents], 0);
+			gnttab_free_grant_reference(lvl2_table[nents]);
+		}
+
+		goto err_cleanup;
+	}
 
 	/* Store lvl3_table page to be freed later */
 	sh_pages_info->lvl3_table = lvl3_table;
@@ -136,6 +180,12 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 
 	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
 	return lvl3_gref;
+
+err_cleanup:
+	free_pages((unsigned long)lvl2_table, n_lvl2_grefs);
+	free_pages((unsigned long)lvl3_table, 1);
+
+	return -ENOSPC;
 }
 
 int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
