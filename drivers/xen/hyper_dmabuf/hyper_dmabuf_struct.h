@@ -51,8 +51,6 @@ struct vmap_vaddr_list {
 
 /* Exporter builds pages_info before sharing pages */
 struct hyper_dmabuf_pages_info {
-        hyper_dmabuf_id_t hid; /* unique id to reference dmabuf in source domain */
-        int hyper_dmabuf_rdomain; /* currenting considering just one remote domain access it */
         int frst_ofst; /* offset of data in the first page */
         int last_len; /* length of data in the last page */
         int nents; /* # of pages */
@@ -71,7 +69,7 @@ struct hyper_dmabuf_sgt_info {
 	int hyper_dmabuf_rdomain; /* domain importing this sgt */
 
 	struct dma_buf *dma_buf; /* needed to store this for freeing it later */
-	int nents; /* number of pages, which may be different than sgt->nents */
+	int nents;
 
 	/* list of remote activities on dma_buf */
 	struct sgt_list *active_sgts;
@@ -92,7 +90,7 @@ struct hyper_dmabuf_sgt_info {
 	 * uses releases hyper_dmabuf device
 	 */
 	struct file *filp;
-	int private[4]; /* device specific info (e.g. image's meta info?) */
+	int priv[4]; /* device specific info (e.g. image's meta info?) */
 };
 
 /* Importer store references (before mapping) on shared pages
