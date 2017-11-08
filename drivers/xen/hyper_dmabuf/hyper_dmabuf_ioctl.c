@@ -148,21 +148,24 @@ reexport:
 	attachment = dma_buf_attach(dma_buf, hyper_dmabuf_private.device);
 	if (IS_ERR(attachment)) {
 		dev_err(hyper_dmabuf_private.device, "Cannot get attachment\n");
-		return PTR_ERR(attachment);
+		ret = PTR_ERR(attachment);
+		goto fail_attach;
 	}
 
 	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
 
 	if (IS_ERR(sgt)) {
 		dev_err(hyper_dmabuf_private.device, "Cannot map attachment\n");
-		return PTR_ERR(sgt);
+		ret = PTR_ERR(sgt);
+		goto fail_map_attachment;
 	}
 
 	sgt_info = kcalloc(1, sizeof(*sgt_info), GFP_KERNEL);
 
 	if(!sgt_info) {
 		dev_err(hyper_dmabuf_private.device, "no more space left\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto fail_sgt_info_creation;
 	}
 
 	sgt_info->hid = hyper_dmabuf_get_hid();
@@ -171,8 +174,8 @@ reexport:
 	if(sgt_info->hid.id == -1) {
 		dev_err(hyper_dmabuf_private.device,
 			"exceeds allowed number of dmabuf to be exported\n");
-		/* TODO: Cleanup sgt */
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto fail_sgt_info_creation;
 	}
 
 	/* TODO: We might need to consider using port number on event channel? */
@@ -286,6 +289,8 @@ reexport:
 
 	return ret;
 
+/* Clean-up if error occurs */
+
 fail_send_request:
 	kfree(req);
 
@@ -293,20 +298,26 @@ fail_map_req:
 	hyper_dmabuf_remove_exported(sgt_info->hid);
 
 fail_export:
-	dma_buf_unmap_attachment(sgt_info->active_attached->attach,
-				 sgt_info->active_sgts->sgt,
-				 DMA_BIDIRECTIONAL);
-	dma_buf_detach(sgt_info->dma_buf, sgt_info->active_attached->attach);
-	dma_buf_put(sgt_info->dma_buf);
-
 	kfree(sgt_info->va_vmapped);
+
 fail_map_va_vmapped:
 	kfree(sgt_info->va_kmapped);
+
 fail_map_va_kmapped:
-	kfree(sgt_info->active_sgts);
-fail_map_active_sgts:
 	kfree(sgt_info->active_attached);
+
 fail_map_active_attached:
+	kfree(sgt_info->active_sgts);
+
+fail_map_active_sgts:
+fail_sgt_info_creation:
+	dma_buf_unmap_attachment(attachment, sgt, DMA_BIDIRECTIONAL);
+
+fail_map_attachment:
+	dma_buf_detach(dma_buf, attachment);
+
+fail_attach:
+	dma_buf_put(dma_buf);
 
 	return ret;
 }
