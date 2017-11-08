@@ -120,9 +120,10 @@ hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 	 */
 	if (hid.id == -1 && count < HYPER_DMABUF_ID_MAX) {
 		hid.id = HYPER_DMABUF_ID_CREATE(hyper_dmabuf_private.domid, count++);
-		/* random data embedded in the id for security */
-		get_random_bytes(&hid.rng_key[0], 12);
 	}
+
+	/* random data embedded in the id for security */
+	get_random_bytes(&hid.rng_key[0], 12);
 
 	return hid;
 }
