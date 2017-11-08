@@ -19,4 +19,14 @@ config HYPER_DMABUF_SYSFS
 	  Expose information about imported and exported buffers using
 	  hyper_dmabuf driver
 
+config HYPER_DMABUF_EVENT_GEN
+	bool "Enable event-generation and polling operation"
+	default n
+	depends on HYPER_DMABUF
+	help
+	  With this config enabled, hyper_dmabuf driver on the importer side
+	  generates events and queue those up in the event list whenever a new
+	  shared DMA-BUF is available. Events in the list can be retrieved by
+	  read operation.
+
 endmenu

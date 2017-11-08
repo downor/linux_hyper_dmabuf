@@ -87,7 +87,7 @@ static int hyper_dmabuf_send_export_msg(struct hyper_dmabuf_sgt_info *sgt_info,
 {
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	struct hyper_dmabuf_req *req;
-	int operands[12] = {0};
+	int operands[40] = {0};
 	int ret, i;
 
 	/* now create request for importer via ring */
@@ -109,7 +109,7 @@ static int hyper_dmabuf_send_export_msg(struct hyper_dmabuf_sgt_info *sgt_info,
 	}
 
 	/* driver/application specific private info, max 4x4 bytes */
-	memcpy(&operands[8], &sgt_info->priv[0], sizeof(unsigned int) * 4);
+	memcpy(&operands[8], &sgt_info->priv[0], sizeof(unsigned int) * 32);
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
@@ -121,11 +121,7 @@ static int hyper_dmabuf_send_export_msg(struct hyper_dmabuf_sgt_info *sgt_info,
 	/* composing a message to the importer */
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT, &operands[0]);
 
-	ret = ops->send_req(sgt_info->hyper_dmabuf_rdomain, req, false);
-
-	if(ret) {
-		dev_err(hyper_dmabuf_private.device, "error while communicating\n");
-	}
+	ret = ops->send_req(sgt_info->hyper_dmabuf_rdomain, req, true);
 
 	kfree(req);
 
@@ -141,7 +137,6 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 	struct hyper_dmabuf_pages_info *page_info;
 	struct hyper_dmabuf_sgt_info *sgt_info;
 	hyper_dmabuf_id_t hid;
-	int i;
 	int ret = 0;
 
 	if (!data) {
@@ -187,10 +182,14 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 				}
 
 				/* update private data in sgt_info with new ones */
-				memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 4);
+				memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 32);
 
-				/* TODO: need to send this private info to the importer so that those
-				 * on importer's side are also updated */
+				/* send an export msg for updating priv in importer */
+				ret = hyper_dmabuf_send_export_msg(sgt_info, NULL);
+
+				if (ret < 0) {
+					dev_err(hyper_dmabuf_private.device, "Failed to send a new private data\n");
+				}
 
 				dma_buf_put(dma_buf);
 				export_remote_attr->hid = hid;
@@ -280,7 +279,7 @@ reexport:
 	INIT_LIST_HEAD(&sgt_info->va_vmapped->list);
 
 	/* copy private data to sgt_info */
-	memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 4);
+	memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 32);
 
 	page_info = hyper_dmabuf_ext_pgs(sgt);
 	if (!page_info) {

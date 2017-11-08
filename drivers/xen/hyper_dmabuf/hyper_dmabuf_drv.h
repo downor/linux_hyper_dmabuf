@@ -30,6 +30,42 @@
 
 struct hyper_dmabuf_req;
 
+struct hyper_dmabuf_event {
+	struct hyper_dmabuf_event_data event_data;
+	struct list_head link;
+};
+
+struct hyper_dmabuf_private {
+        struct device *device;
+
+	/* VM(domain) id of current VM instance */
+	int domid;
+
+	/* workqueue dedicated to hyper_dmabuf driver */
+	struct workqueue_struct *work_queue;
+
+	/* list of reusable hyper_dmabuf_ids */
+	struct list_reusable_id *id_queue;
+
+	/* backend ops - hypervisor specific */
+	struct hyper_dmabuf_backend_ops *backend_ops;
+
+	/* device global lock */
+	/* TODO: might need a lock per resource (e.g. EXPORT LIST) */
+	struct mutex lock;
+
+	/* flag that shows whether backend is initialized */
+	bool backend_initialized;
+
+        wait_queue_head_t event_wait;
+        struct list_head event_list;
+
+	spinlock_t event_lock;
+	struct mutex event_read_lock;
+
+	int curr_num_event;
+};
+
 struct list_reusable_id {
 	hyper_dmabuf_id_t hid;
 	struct list_head list;
@@ -67,18 +103,6 @@ struct hyper_dmabuf_backend_ops {
 	int (*init_tx_ch)(int);
 
 	int (*send_req)(int, struct hyper_dmabuf_req *, int);
-};
-
-struct hyper_dmabuf_private {
-        struct device *device;
-	int domid;
-	struct workqueue_struct *work_queue;
-	struct list_reusable_id *id_queue;
-
-	/* backend ops - hypervisor specific */
-	struct hyper_dmabuf_backend_ops *backend_ops;
-	struct mutex lock;
-	bool backend_initialized;
 };
 
 #endif /* __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__ */

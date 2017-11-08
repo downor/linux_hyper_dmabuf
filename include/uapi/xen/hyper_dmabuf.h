@@ -30,6 +30,17 @@ typedef struct {
         int rng_key[3]; /* 12bytes long random number */
 } hyper_dmabuf_id_t;
 
+struct hyper_dmabuf_event_hdr {
+	int event_type; /* one type only for now - new import */
+	hyper_dmabuf_id_t hid; /* hyper_dmabuf_id of specific hyper_dmabuf */
+	size_t size; /* size of data */
+};
+
+struct hyper_dmabuf_event_data {
+	struct hyper_dmabuf_event_hdr hdr;
+	void *data; /* private data */
+};
+
 #define IOCTL_HYPER_DMABUF_TX_CH_SETUP \
 _IOC(_IOC_NONE, 'G', 0, sizeof(struct ioctl_hyper_dmabuf_tx_ch_setup))
 struct ioctl_hyper_dmabuf_tx_ch_setup {
@@ -56,7 +67,7 @@ struct ioctl_hyper_dmabuf_export_remote {
 	int remote_domain;
 	/* exported dma buf id */
 	hyper_dmabuf_id_t hid;
-	int priv[4];
+	int priv[32];
 };
 
 #define IOCTL_HYPER_DMABUF_EXPORT_FD \
