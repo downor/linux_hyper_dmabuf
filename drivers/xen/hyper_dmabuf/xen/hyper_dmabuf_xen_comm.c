@@ -47,6 +47,14 @@ struct hyper_dmabuf_req req_pending = {0};
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
+extern int xenstored_ready;
+
+static void xen_get_domid_delayed(struct work_struct *unused);
+static void xen_init_comm_env_delayed(struct work_struct *unused);
+
+static DECLARE_DELAYED_WORK(get_vm_id_work, xen_get_domid_delayed);
+static DECLARE_DELAYED_WORK(xen_init_comm_env_work, xen_init_comm_env_delayed);
+
 /* Creates entry in xen store that will keep details of all
  * exporter rings created by this domain
  */
@@ -54,7 +62,7 @@ static int xen_comm_setup_data_dir(void)
 {
 	char buf[255];
 
-	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_xen_get_domid());
+	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_private.domid);
 	return xenbus_mkdir(XBT_NIL, buf, "");
 }
 
@@ -68,7 +76,7 @@ static int xen_comm_destroy_data_dir(void)
 {
 	char buf[255];
 
-	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_xen_get_domid());
+	sprintf(buf, "/local/domain/%d/data/hyper_dmabuf", hyper_dmabuf_private.domid);
 	return xenbus_rm(XBT_NIL, buf, "");
 }
 
@@ -131,16 +139,58 @@ static int xen_comm_get_ring_details(int domid, int rdomid, int *grefid, int *po
 	return (ret <= 0 ? 1 : 0);
 }
 
+void xen_get_domid_delayed(struct work_struct *unused)
+{
+	struct xenbus_transaction xbt;
+	int domid, ret;
+
+	/* scheduling another if driver is still running
+	 * and xenstore has not been initialized */
+	if (hyper_dmabuf_private.exited == false &&
+	    likely(xenstored_ready == 0)) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"Xenstore is not quite ready yet. Will retry it in 500ms\n");
+		schedule_delayed_work(&get_vm_id_work, msecs_to_jiffies(500));
+	} else {
+	        xenbus_transaction_start(&xbt);
+
+		ret = xenbus_scanf(xbt, "domid","", "%d", &domid);
+
+		if (ret <= 0)
+			domid = -1;
+
+		xenbus_transaction_end(xbt, 0);
+
+		/* try again since -1 is an invalid id for domain
+		 * (but only if driver is still running) */
+		if (hyper_dmabuf_private.exited == false && unlikely(domid == -1)) {
+			dev_dbg(hyper_dmabuf_private.device,
+				"domid==-1 is invalid. Will retry it in 500ms\n");
+			schedule_delayed_work(&get_vm_id_work, msecs_to_jiffies(500));
+		} else {
+			dev_info(hyper_dmabuf_private.device,
+				"Successfully retrieved domid from Xenstore:%d\n", domid);
+			hyper_dmabuf_private.domid = domid;
+		}
+	}
+}
+
 int hyper_dmabuf_xen_get_domid(void)
 {
 	struct xenbus_transaction xbt;
 	int domid;
+
+	if (unlikely(xenstored_ready == 0)) {
+		xen_get_domid_delayed(NULL);
+		return -1;
+	}
 
         xenbus_transaction_start(&xbt);
 
         if (!xenbus_scanf(xbt, "domid","", "%d", &domid)) {
 		domid = -1;
         }
+
         xenbus_transaction_end(xbt, 0);
 
 	return domid;
@@ -193,6 +243,8 @@ static void remote_dom_exporter_watch_cb(struct xenbus_watch *watch,
 	 * it means that remote domain has setup it for us and we should connect
 	 * to it.
 	 */
+
+
 	ret = xen_comm_get_ring_details(hyper_dmabuf_xen_get_domid(), rdom,
 					&grefid, &port);
 
@@ -389,6 +441,7 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 		return 0;
 	}
 
+
 	ret = xen_comm_get_ring_details(hyper_dmabuf_xen_get_domid(), domid,
 					&rx_gref, &rx_port);
 
@@ -519,12 +572,108 @@ void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid)
 	FRONT_RING_INIT(&(tx_ring_info->ring_front), tx_ring_info->ring_front.sring, PAGE_SIZE);
 }
 
+#ifdef CONFIG_HYPER_DMABUF_XEN_AUTO_RX_CH_ADD
+
+static void xen_rx_ch_add_delayed(struct work_struct *unused);
+
+static DECLARE_DELAYED_WORK(xen_rx_ch_auto_add_work, xen_rx_ch_add_delayed);
+
+#define DOMID_SCAN_START	1	/*  domid = 1 */
+#define DOMID_SCAN_END		10	/* domid = 10 */
+
+static void xen_rx_ch_add_delayed(struct work_struct *unused)
+{
+	int ret;
+	char buf[128];
+	int i, dummy;
+
+	dev_dbg(hyper_dmabuf_private.device,
+		"Scanning new tx channel comming from another domain\n");
+
+	/* check other domains and schedule another work if driver
+	 * is still running and backend is valid
+	 */
+	if (hyper_dmabuf_private.exited == false &&
+	    hyper_dmabuf_private.backend_initialized == true) {
+		for (i = DOMID_SCAN_START; i < DOMID_SCAN_END + 1; i++) {
+			if (i == hyper_dmabuf_private.domid)
+				continue;
+
+			sprintf(buf, "/local/domain/%d/data/hyper_dmabuf/%d", i,
+				hyper_dmabuf_private.domid);
+
+			ret = xenbus_scanf(XBT_NIL, buf, "port", "%d", &dummy);
+
+			if (ret > 0) {
+				if (xen_comm_find_rx_ring(i) != NULL)
+					continue;
+
+				ret = hyper_dmabuf_xen_init_rx_rbuf(i);
+
+				if (!ret)
+					dev_info(hyper_dmabuf_private.device,
+						 "Finishing up setting up rx channel for domain %d\n", i);
+			}
+		}
+
+		/* check every 10 seconds */
+		schedule_delayed_work(&xen_rx_ch_auto_add_work, msecs_to_jiffies(10000));
+	}
+}
+
+#endif /* CONFIG_HYPER_DMABUF_XEN_AUTO_RX_CH_ADD */
+
+void xen_init_comm_env_delayed(struct work_struct *unused)
+{
+	int ret;
+
+	/* scheduling another work if driver is still running
+	 * and xenstore hasn't been initialized or dom_id hasn't
+	 * been correctly retrieved. */
+	if (hyper_dmabuf_private.exited == false &&
+	    likely(xenstored_ready == 0 ||
+	    hyper_dmabuf_private.domid == -1)) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"Xenstore is not ready yet. Re-try this again in 500ms\n");
+		schedule_delayed_work(&xen_init_comm_env_work, msecs_to_jiffies(500));
+	} else {
+		ret = xen_comm_setup_data_dir();
+		if (ret < 0) {
+			dev_err(hyper_dmabuf_private.device,
+				"Failed to create data dir in Xenstore\n");
+		} else {
+			dev_info(hyper_dmabuf_private.device,
+				"Successfully finished comm env initialization\n");
+			hyper_dmabuf_private.backend_initialized = true;
+
+#ifdef CONFIG_HYPER_DMABUF_XEN_AUTO_RX_CH_ADD
+			xen_rx_ch_add_delayed(NULL);
+#endif /* CONFIG_HYPER_DMABUF_XEN_AUTO_RX_CH_ADD */
+		}
+	}
+}
+
 int hyper_dmabuf_xen_init_comm_env(void)
 {
 	int ret;
 
 	xen_comm_ring_table_init();
+
+	if (unlikely(xenstored_ready == 0 || hyper_dmabuf_private.domid == -1)) {
+		xen_init_comm_env_delayed(NULL);
+		return -1;
+	}
+
 	ret = xen_comm_setup_data_dir();
+	if (ret < 0) {
+		dev_err(hyper_dmabuf_private.device,
+			"Failed to create data dir in Xenstore\n");
+	} else {
+		dev_info(hyper_dmabuf_private.device,
+			"Successfully finished comm env initialization\n");
+
+		hyper_dmabuf_private.backend_initialized = true;
+	}
 
 	return ret;
 }

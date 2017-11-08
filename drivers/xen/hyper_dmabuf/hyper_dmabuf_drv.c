@@ -67,27 +67,6 @@ int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 	if (filp->f_flags & O_EXCL)
 		return -EBUSY;
 
-	/*
-	 * Initialize backend if needed,
-	 * use mutex to prevent race conditions when
-	 * two userspace apps will open device at the same time
-	 */
-	mutex_lock(&hyper_dmabuf_private.lock);
-
-	if (!hyper_dmabuf_private.backend_initialized) {
-		hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
-
-		ret = hyper_dmabuf_private.backend_ops->init_comm_env();
-	        if (ret < 0) {
-			dev_err(hyper_dmabuf_private.device,
-				"failed to initiailize hypervisor-specific comm env\n");
-		} else {
-			hyper_dmabuf_private.backend_initialized = true;
-		}
-	}
-
-	mutex_unlock(&hyper_dmabuf_private.lock);
-
 	return ret;
 }
 
@@ -260,17 +239,22 @@ static int __init hyper_dmabuf_drv_init(void)
 		return ret;
 	}
 
+/* currently only supports XEN hypervisor */
+
 #ifdef CONFIG_HYPER_DMABUF_XEN
 	hyper_dmabuf_private.backend_ops = &xen_backend_ops;
+#else
+	hyper_dmabuf_private.backend_ops = NULL;
+	printk( KERN_ERR "hyper_dmabuf drv currently supports XEN only.\n");
 #endif
-	/*
-	 * Defer backend setup to first open call.
-	 * Due to fact that some hypervisors eg. Xen, may have dependencies
-	 * to userspace daemons like xenstored, in that case all xenstore
-	 * calls done from kernel will block until that deamon will be
-	 * started, in case where module is built in that will block entire
-	 * kernel initialization.
-	 */
+
+	if (hyper_dmabuf_private.backend_ops == NULL) {
+		printk( KERN_ERR "Hyper_dmabuf: failed to be loaded - no backend found\n");
+		return -1;
+	}
+
+	mutex_lock(&hyper_dmabuf_private.lock);
+
 	hyper_dmabuf_private.backend_initialized = false;
 
 	dev_info(hyper_dmabuf_private.device,
@@ -301,6 +285,22 @@ static int __init hyper_dmabuf_drv_init(void)
 	init_waitqueue_head(&hyper_dmabuf_private.event_wait);
 
 	hyper_dmabuf_private.curr_num_event = 0;
+	hyper_dmabuf_private.exited = false;
+
+	hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
+
+	ret = hyper_dmabuf_private.backend_ops->init_comm_env();
+	if (ret < 0) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"failed to initialize comm-env but it will re-attempt.\n");
+	} else {
+		hyper_dmabuf_private.backend_initialized = true;
+	}
+
+	mutex_unlock(&hyper_dmabuf_private.lock);
+
+	dev_info(hyper_dmabuf_private.device,
+		"Finishing up initialization of hyper_dmabuf drv\n");
 
 	/* interrupt for comm should be registered here: */
 	return ret;
@@ -311,6 +311,8 @@ static void hyper_dmabuf_drv_exit(void)
 #ifdef CONFIG_HYPER_DMABUF_SYSFS
 	hyper_dmabuf_unregister_sysfs(hyper_dmabuf_private.device);
 #endif
+
+	mutex_lock(&hyper_dmabuf_private.lock);
 
 	/* hash tables for export/import entries and ring_infos */
 	hyper_dmabuf_table_destroy();
@@ -324,6 +326,10 @@ static void hyper_dmabuf_drv_exit(void)
 	/* destroy id_queue */
 	if (hyper_dmabuf_private.id_queue)
 		destroy_reusable_list();
+
+	hyper_dmabuf_private.exited = true;
+
+	mutex_unlock(&hyper_dmabuf_private.lock);
 
 	dev_info(hyper_dmabuf_private.device,
 		 "hyper_dmabuf driver: Exiting\n");
