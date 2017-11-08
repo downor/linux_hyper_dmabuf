@@ -723,7 +723,7 @@ int register_device(void)
 	hyper_dmabuf_private.device = hyper_dmabuf_miscdev.this_device;
 
 	/* TODO: Check if there is a different way to initialize dma mask nicely */
-	dma_coerce_mask_and_coherent(hyper_dmabuf_private.device, 0xFFFFFFFF);
+	dma_coerce_mask_and_coherent(hyper_dmabuf_private.device, DMA_BIT_MASK(64));
 
 	return ret;
 }
