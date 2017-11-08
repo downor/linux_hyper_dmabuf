@@ -31,7 +31,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/miscdevice.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/dma-buf.h>
 #include <linux/delay.h>
 #include <linux/list.h>
@@ -46,7 +46,7 @@
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
-static int hyper_dmabuf_tx_ch_setup(struct file *filp, void *data)
+static int hyper_dmabuf_tx_ch_setup_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_tx_ch_setup *tx_ch_attr;
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
@@ -63,7 +63,7 @@ static int hyper_dmabuf_tx_ch_setup(struct file *filp, void *data)
 	return ret;
 }
 
-static int hyper_dmabuf_rx_ch_setup(struct file *filp, void *data)
+static int hyper_dmabuf_rx_ch_setup_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_rx_ch_setup *rx_ch_attr;
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
@@ -81,7 +81,7 @@ static int hyper_dmabuf_rx_ch_setup(struct file *filp, void *data)
 	return ret;
 }
 
-static int hyper_dmabuf_export_remote(struct file *filp, void *data)
+static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_export_remote *export_remote_attr;
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
@@ -514,7 +514,7 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 
 /* Schedules unexport of dmabuf.
  */
-static int hyper_dmabuf_unexport(struct file *filp, void *data)
+static int hyper_dmabuf_unexport_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_unexport *unexport_attr;
 	struct hyper_dmabuf_sgt_info *sgt_info;
@@ -554,11 +554,11 @@ static int hyper_dmabuf_unexport(struct file *filp, void *data)
 	return 0;
 }
 
-static int hyper_dmabuf_query(struct file *filp, void *data)
+static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_query *query_attr;
-	struct hyper_dmabuf_sgt_info *sgt_info;
-	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	struct hyper_dmabuf_sgt_info *sgt_info = NULL;
+	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info = NULL;
 	int ret = 0;
 
 	if (!data) {
@@ -568,71 +568,46 @@ static int hyper_dmabuf_query(struct file *filp, void *data)
 
 	query_attr = (struct ioctl_hyper_dmabuf_query *)data;
 
-	sgt_info = hyper_dmabuf_find_exported(query_attr->hid);
-	imported_sgt_info = hyper_dmabuf_find_imported(query_attr->hid);
-
-	/* if dmabuf can't be found in both lists, return */
-	if (!(sgt_info && imported_sgt_info)) {
-		dev_err(hyper_dmabuf_private.device, "can't find entry anywhere\n");
-		return -ENOENT;
+	if (HYPER_DMABUF_DOM_ID(query_attr->hid) == hyper_dmabuf_private.domid) {
+		/* query for exported dmabuf */
+		sgt_info = hyper_dmabuf_find_exported(query_attr->hid);
+		if (sgt_info) {
+			ret = hyper_dmabuf_query_exported(sgt_info, query_attr->item);
+			if (ret != -EINVAL)
+				query_attr->info = ret;
+		} else {
+			dev_err(hyper_dmabuf_private.device,
+				"DMA BUF {id:%d key:%d %d %d} can't be found in the export list\n",
+				query_attr->hid.id, query_attr->hid.rng_key[0], query_attr->hid.rng_key[1],
+				query_attr->hid.rng_key[2]);
+			return -ENOENT;
+		}
+	} else {
+		/* query for imported dmabuf */
+		imported_sgt_info = hyper_dmabuf_find_imported(query_attr->hid);
+		if (imported_sgt_info) {
+			ret = hyper_dmabuf_query_imported(imported_sgt_info, query_attr->item);
+			if (ret != -EINVAL)
+				query_attr->info = ret;
+		} else {
+			dev_err(hyper_dmabuf_private.device,
+				"DMA BUF {id:%d key:%d %d %d} can't be found in the imported list\n",
+				query_attr->hid.id, query_attr->hid.rng_key[0], query_attr->hid.rng_key[1],
+				query_attr->hid.rng_key[2]);
+			return -ENOENT;
+		}
 	}
 
-	/* not considering the case where a dmabuf is found on both queues
-	 * in one domain */
-	switch (query_attr->item)
-	{
-		case DMABUF_QUERY_TYPE_LIST:
-			if (sgt_info) {
-				query_attr->info = EXPORTED;
-			} else {
-				query_attr->info = IMPORTED;
-			}
-			break;
-
-		/* exporting domain of this specific dmabuf*/
-		case DMABUF_QUERY_EXPORTER:
-			if (sgt_info) {
-				query_attr->info = 0xFFFFFFFF; /* myself */
-			} else {
-				query_attr->info = HYPER_DMABUF_DOM_ID(imported_sgt_info->hid);
-			}
-			break;
-
-		/* importing domain of this specific dmabuf */
-		case DMABUF_QUERY_IMPORTER:
-			if (sgt_info) {
-				query_attr->info = sgt_info->hyper_dmabuf_rdomain;
-			} else {
-#if 0 /* TODO: a global variable, current_domain does not exist yet*/
-				query_attr->info = current_domain;
-#endif
-			}
-			break;
-
-		/* size of dmabuf in byte */
-		case DMABUF_QUERY_SIZE:
-			if (sgt_info) {
-#if 0 /* TODO: hyper_dmabuf_buf_size is not implemented yet */
-				query_attr->info = hyper_dmabuf_buf_size(sgt_info->sgt);
-#endif
-			} else {
-				query_attr->info = imported_sgt_info->nents * 4096 -
-						   imported_sgt_info->frst_ofst - 4096 +
-						   imported_sgt_info->last_len;
-			}
-			break;
-	}
-
-	return ret;
+	return 0;
 }
 
 static const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_TX_CH_SETUP, hyper_dmabuf_tx_ch_setup, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_RX_CH_SETUP, hyper_dmabuf_rx_ch_setup, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_REMOTE, hyper_dmabuf_export_remote, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_TX_CH_SETUP, hyper_dmabuf_tx_ch_setup_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_RX_CH_SETUP, hyper_dmabuf_rx_ch_setup_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_REMOTE, hyper_dmabuf_export_remote_ioctl, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_FD, hyper_dmabuf_export_fd_ioctl, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_UNEXPORT, hyper_dmabuf_unexport, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY, hyper_dmabuf_query, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_UNEXPORT, hyper_dmabuf_unexport_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY, hyper_dmabuf_query_ioctl, 0),
 };
 
 static long hyper_dmabuf_ioctl(struct file *filp,
@@ -731,7 +706,7 @@ static void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_inf
 		unexport_attr.hid = sgt_info->hid;
 		unexport_attr.delay_ms = 0;
 
-		hyper_dmabuf_unexport(filp, &unexport_attr);
+		hyper_dmabuf_unexport_ioctl(filp, &unexport_attr);
 	}
 }
 

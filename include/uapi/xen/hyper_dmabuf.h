@@ -98,4 +98,21 @@ struct ioctl_hyper_dmabuf_query {
 	int info;
 };
 
+/* DMABUF query */
+
+enum hyper_dmabuf_query {
+        HYPER_DMABUF_QUERY_TYPE = 0x10,
+        HYPER_DMABUF_QUERY_EXPORTER,
+        HYPER_DMABUF_QUERY_IMPORTER,
+        HYPER_DMABUF_QUERY_SIZE,
+        HYPER_DMABUF_QUERY_BUSY,
+        HYPER_DMABUF_QUERY_UNEXPORTED,
+        HYPER_DMABUF_QUERY_DELAYED_UNEXPORTED,
+};
+
+enum hyper_dmabuf_status {
+        EXPORTED= 0x01,
+        IMPORTED,
+};
+
 #endif //__LINUX_PUBLIC_HYPER_DMABUF_H__
