@@ -1,40 +1,8 @@
-/*
- * Copyright © 2017 Intel Corporation
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice (including the next
- * paragraph) shall be included in all copies or substantial portions of the
- * Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
- *
- */
-
 #ifndef __HYPER_DMABUF_QUERY_H__
 #define __HYPER_DMABUF_QUERY_H__
 
-enum hyper_dmabuf_query {
-	DMABUF_QUERY_TYPE_LIST = 0x10,
-	DMABUF_QUERY_EXPORTER,
-	DMABUF_QUERY_IMPORTER,
-	DMABUF_QUERY_SIZE
-};
+int hyper_dmabuf_query_imported(struct hyper_dmabuf_imported_sgt_info *imported_sgt_info, int query);
 
-enum hyper_dmabuf_status {
-	EXPORTED = 0x01,
-	IMPORTED
-};
+int hyper_dmabuf_query_exported(struct hyper_dmabuf_sgt_info *sgt_info, int query);
 
-#endif /* __HYPER_DMABUF_QUERY_H__ */
+#endif // __HYPER_DMABUF_QUERY_H__
