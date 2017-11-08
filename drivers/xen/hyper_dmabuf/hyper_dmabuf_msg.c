@@ -134,6 +134,13 @@ void cmd_process_work(struct work_struct *work)
 		 * operands5~8 : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
 		imported_sgt_info = kcalloc(1, sizeof(*imported_sgt_info), GFP_KERNEL);
+
+		if (!imported_sgt_info) {
+			dev_err(hyper_dmabuf_private.device,
+				"No memory left to be allocated\n");
+			break;
+		}
+
 		imported_sgt_info->hyper_dmabuf_id = req->operands[0];
 		imported_sgt_info->frst_ofst = req->operands[2];
 		imported_sgt_info->last_len = req->operands[3];
@@ -288,9 +295,22 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		"%s: putting request to workqueue\n", __func__);
 	temp_req = kmalloc(sizeof(*temp_req), GFP_KERNEL);
 
+	if (!temp_req) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		return -ENOMEM;
+	}
+
 	memcpy(temp_req, req, sizeof(*temp_req));
 
 	proc = kcalloc(1, sizeof(struct cmd_process), GFP_KERNEL);
+
+	if (!proc) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		return -ENOMEM;
+	}
+
 	proc->rq = temp_req;
 	proc->domid = domid;
 

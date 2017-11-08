@@ -1,0 +1,6 @@
+# UAPI Header export list
+header-y += evtchn.h
+header-y += gntalloc.h
+header-y += gntdev.h
+header-y += privcmd.h
+header-y += hyper_dmabuf.h

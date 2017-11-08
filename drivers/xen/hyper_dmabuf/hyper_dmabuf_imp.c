@@ -270,6 +270,12 @@ inline int hyper_dmabuf_sync_request(int id, int dmabuf_ops)
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
+	if (!req) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		return -ENOMEM;
+	}
+
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_OPS_TO_SOURCE, &operands[0]);
 
 	/* send request and wait for a response */
@@ -366,8 +372,11 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	return st;
 
 err_free_sg:
-	sg_free_table(st);
-	kfree(st);
+	if (st) {
+		sg_free_table(st);
+		kfree(st);
+	}
+
 	return NULL;
 }
 

@@ -66,6 +66,15 @@ static int __init hyper_dmabuf_drv_init(void)
 #ifdef CONFIG_HYPER_DMABUF_XEN
 	hyper_dmabuf_private.backend_ops = &xen_backend_ops;
 #endif
+	/*
+	 * Defer backend setup to first open call.
+	 * Due to fact that some hypervisors eg. Xen, may have dependencies
+	 * to userspace daemons like xenstored, in that case all xenstore
+	 * calls done from kernel will block until that deamon will be
+	 * started, in case where module is built in that will block entire
+	 * kernel initialization.
+	 */
+	hyper_dmabuf_private.backend_initialized = false;
 
 	dev_info(hyper_dmabuf_private.device,
 		 "initializing database for imported/exported dmabufs\n");
@@ -73,19 +82,11 @@ static int __init hyper_dmabuf_drv_init(void)
 	/* device structure initialization */
 	/* currently only does work-queue initialization */
 	hyper_dmabuf_private.work_queue = create_workqueue("hyper_dmabuf_wqueue");
-	hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
 
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {
 		dev_err(hyper_dmabuf_private.device,
 			"failed to initialize table for exported/imported entries\n");
-		return ret;
-	}
-
-	ret = hyper_dmabuf_private.backend_ops->init_comm_env();
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"failed to initiailize hypervisor-specific comm env\n");
 		return ret;
 	}
 
