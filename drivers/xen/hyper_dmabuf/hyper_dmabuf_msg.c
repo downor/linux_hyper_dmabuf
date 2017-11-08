@@ -65,10 +65,11 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 		 * operands5 : offset of data in the first page
 		 * operands6 : length of data in the last page
 		 * operands7 : top-level reference number for shared pages
-		 * operands8~39 : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * operands8 : size of private data (from operands9)
+		 * operands9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
 
-		memcpy(&req->operands[0], &operands[0], 40 * sizeof(int));
+		memcpy(&req->operands[0], &operands[0], 9 * sizeof(int) + operands[8]);
 		break;
 
 	case HYPER_DMABUF_NOTIFY_UNEXPORT:
@@ -135,7 +136,8 @@ void cmd_process_work(struct work_struct *work)
 		 * operands5 : offset of data in the first page
 		 * operands6 : length of data in the last page
 		 * operands7 : top-level reference number for shared pages
-		 * operands8~11 : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * operands8 : size of private data (from operands9)
+		 * operands9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
 
 		/* if nents == 0, it means it is a message only for priv synchronization
@@ -152,8 +154,25 @@ void cmd_process_work(struct work_struct *work)
 					"Can't find imported sgt_info from IMPORT_LIST\n");
 				break;
 			}
-			/* updating pri data */
-			memcpy(&imported_sgt_info->priv[0], &req->operands[8], 32 * sizeof(int));
+
+			/* if size of new private data is different,
+			 * we reallocate it. */
+			if (imported_sgt_info->sz_priv != req->operands[8]) {
+				kfree(imported_sgt_info->priv);
+				imported_sgt_info->sz_priv = req->operands[8];
+				imported_sgt_info->priv = kcalloc(1, req->operands[8], GFP_KERNEL);
+				if (!imported_sgt_info->priv) {
+					dev_err(hyper_dmabuf_private.device,
+						"Fail to allocate priv\n");
+
+					/* set it invalid */
+					imported_sgt_info->valid = 0;
+					break;
+				}
+			}
+
+			/* updating priv data */
+			memcpy(imported_sgt_info->priv, &req->operands[9], req->operands[8]);
 
 #ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 			/* generating import event */
@@ -168,6 +187,17 @@ void cmd_process_work(struct work_struct *work)
 		if (!imported_sgt_info) {
 			dev_err(hyper_dmabuf_private.device,
 				"No memory left to be allocated\n");
+			break;
+		}
+
+		imported_sgt_info->sz_priv = req->operands[8];
+		imported_sgt_info->priv = kcalloc(1, req->operands[8], GFP_KERNEL);
+
+		if (!imported_sgt_info->priv) {
+			dev_err(hyper_dmabuf_private.device,
+				"Fail to allocate priv\n");
+
+			kfree(imported_sgt_info);
 			break;
 		}
 
@@ -190,7 +220,7 @@ void cmd_process_work(struct work_struct *work)
 		dev_dbg(hyper_dmabuf_private.device, "\tlast len %d\n", req->operands[6]);
 		dev_dbg(hyper_dmabuf_private.device, "\tgrefid %d\n", req->operands[7]);
 
-		memcpy(&imported_sgt_info->priv[0], &req->operands[8], 32 * sizeof(int));
+		memcpy(imported_sgt_info->priv, &req->operands[9], req->operands[8]);
 
 		imported_sgt_info->valid = 1;
 		hyper_dmabuf_register_imported(imported_sgt_info);

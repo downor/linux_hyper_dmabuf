@@ -57,6 +57,7 @@ struct hyper_dmabuf_pages_info {
         struct page **pages; /* pages that contains reference numbers of shared pages*/
 };
 
+
 /* Both importer and exporter use this structure to point to sg lists
  *
  * Exporter stores references to sgt in a hash table
@@ -90,7 +91,9 @@ struct hyper_dmabuf_sgt_info {
 	 * uses releases hyper_dmabuf device
 	 */
 	struct file *filp;
-	int priv[32]; /* device specific info (e.g. image's meta info?) */
+
+	size_t sz_priv;
+	char *priv; /* device specific info (e.g. image's meta info?) */
 };
 
 /* Importer store references (before mapping) on shared pages
@@ -110,7 +113,9 @@ struct hyper_dmabuf_imported_sgt_info {
 	void *refs_info;
 	bool valid;
 	int num_importers;
-	int priv[32]; /* device specific info (e.g. image's meta info?) */
+
+	size_t sz_priv;
+	char *priv; /* device specific info (e.g. image's meta info?) */
 };
 
 #endif /* __HYPER_DMABUF_STRUCT_H__ */

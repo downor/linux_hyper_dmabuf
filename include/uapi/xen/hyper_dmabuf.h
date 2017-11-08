@@ -25,6 +25,8 @@
 #ifndef __LINUX_PUBLIC_HYPER_DMABUF_H__
 #define __LINUX_PUBLIC_HYPER_DMABUF_H__
 
+#define MAX_SIZE_PRIV_DATA 192
+
 typedef struct {
         int id;
         int rng_key[3]; /* 12bytes long random number */
@@ -33,7 +35,7 @@ typedef struct {
 struct hyper_dmabuf_event_hdr {
 	int event_type; /* one type only for now - new import */
 	hyper_dmabuf_id_t hid; /* hyper_dmabuf_id of specific hyper_dmabuf */
-	size_t size; /* size of data */
+	int size; /* size of data */
 };
 
 struct hyper_dmabuf_event_data {
@@ -67,7 +69,8 @@ struct ioctl_hyper_dmabuf_export_remote {
 	int remote_domain;
 	/* exported dma buf id */
 	hyper_dmabuf_id_t hid;
-	int priv[32];
+	int sz_priv;
+	char *priv;
 };
 
 #define IOCTL_HYPER_DMABUF_EXPORT_FD \

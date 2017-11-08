@@ -74,9 +74,6 @@ int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 {
 	hyper_dmabuf_foreach_exported(hyper_dmabuf_emergency_release, filp);
 
-	/* clean up event queue */
-	hyper_dmabuf_events_release();
-
 	return 0;
 }
 
@@ -98,12 +95,18 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 	int ret;
 
 	/* only root can read events */
-	if (!capable(CAP_DAC_OVERRIDE))
+	if (!capable(CAP_DAC_OVERRIDE)) {
+		dev_err(hyper_dmabuf_private.device,
+			"Only root can read events\n");
 		return -EFAULT;
+	}
 
 	/* make sure user buffer can be written */
-	if (!access_ok(VERIFY_WRITE, buffer, count))
+	if (!access_ok(VERIFY_WRITE, buffer, count)) {
+		dev_err(hyper_dmabuf_private.device,
+			"User buffer can't be written.\n");
 		return -EFAULT;
+	}
 
 	ret = mutex_lock_interruptible(&hyper_dmabuf_private.event_read_lock);
 	if (ret)
@@ -132,7 +135,7 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 			ret = wait_event_interruptible(hyper_dmabuf_private.event_wait,
 						       !list_empty(&hyper_dmabuf_private.event_list));
 
-			if (ret >= 0)
+			if (ret == 0)
 				ret = mutex_lock_interruptible(&hyper_dmabuf_private.event_read_lock);
 
 			if (ret)
@@ -174,13 +177,14 @@ put_back_event:
 			}
 
 			ret += e->event_data.hdr.size;
+			hyper_dmabuf_private.curr_num_event--;
 			kfree(e);
 		}
 	}
 
 	mutex_unlock(&hyper_dmabuf_private.event_read_lock);
 
-	return 0;
+	return ret;
 }
 
 static struct file_operations hyper_dmabuf_driver_fops =
@@ -233,6 +237,8 @@ static int __init hyper_dmabuf_drv_init(void)
 	printk( KERN_NOTICE "hyper_dmabuf_starting: Initialization started\n");
 
 	mutex_init(&hyper_dmabuf_private.lock);
+	mutex_init(&hyper_dmabuf_private.event_read_lock);
+	spin_lock_init(&hyper_dmabuf_private.event_lock);
 
 	ret = register_device();
 	if (ret < 0) {
@@ -328,6 +334,9 @@ static void hyper_dmabuf_drv_exit(void)
 		destroy_reusable_list();
 
 	hyper_dmabuf_private.exited = true;
+
+	/* clean up event queue */
+	hyper_dmabuf_events_release();
 
 	mutex_unlock(&hyper_dmabuf_private.lock);
 
