@@ -187,10 +187,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	 * side.
 	 */
 	if (!force &&
-	    (!list_empty(&sgt_info->va_kmapped->list) ||
-	    !list_empty(&sgt_info->va_vmapped->list) ||
-	    !list_empty(&sgt_info->active_sgts->list) ||
-	    !list_empty(&sgt_info->active_attached->list))) {
+	    sgt_info->importer_exported) {
 		dev_warn(hyper_dmabuf_private.device, "dma-buf is used by importer\n");
 		return -EPERM;
 	}
@@ -259,7 +256,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	return 0;
 }
 
-#define WAIT_AFTER_SYNC_REQ 1
+#define WAIT_AFTER_SYNC_REQ 0
 
 inline int hyper_dmabuf_sync_request(int id, int dmabuf_ops)
 {
@@ -431,17 +428,11 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 	final_release = sgt_info && !sgt_info->valid &&
 		        !sgt_info->num_importers;
 
-	if (final_release) {
-		ret = hyper_dmabuf_sync_request(sgt_info->hyper_dmabuf_id,
-						HYPER_DMABUF_OPS_RELEASE_FINAL);
-	} else {
-		ret = hyper_dmabuf_sync_request(sgt_info->hyper_dmabuf_id,
-						HYPER_DMABUF_OPS_RELEASE);
-	}
-
+	ret = hyper_dmabuf_sync_request(sgt_info->hyper_dmabuf_id,
+					HYPER_DMABUF_OPS_RELEASE);
 	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
+		dev_warn(hyper_dmabuf_private.device,
+			 "hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
 	}
 
 	/*
