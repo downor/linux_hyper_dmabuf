@@ -232,7 +232,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	/* from exporter to importer */
 	shared_ring = (void *)__get_free_pages(GFP_KERNEL, 1);
 	if (shared_ring == 0) {
-		return -EINVAL;
+		return -ENOMEM;
 	}
 
 	sring = (struct xen_comm_sring *) shared_ring;
@@ -246,17 +246,17 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 							   0);
 	if (ring_info->gref_ring < 0) {
 		/* fail to get gref */
-		return -EINVAL;
+		return -EFAULT;
 	}
 
 	alloc_unbound.dom = DOMID_SELF;
 	alloc_unbound.remote_dom = domid;
 	ret = HYPERVISOR_event_channel_op(EVTCHNOP_alloc_unbound,
 					&alloc_unbound);
-	if (ret != 0) {
+	if (ret) {
 		dev_err(hyper_dmabuf_private.device,
 			"Cannot allocate event channel\n");
-		return -EINVAL;
+		return -EIO;
 	}
 
 	/* setting up interrupt */
@@ -271,7 +271,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 		HYPERVISOR_event_channel_op(EVTCHNOP_close, &close);
 		gnttab_end_foreign_access(ring_info->gref_ring, 0,
 					virt_to_mfn(shared_ring));
-		return -EINVAL;
+		return -EIO;
 	}
 
 	ring_info->rdomain = domid;
@@ -387,7 +387,7 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	map_ops = kmalloc(sizeof(*map_ops), GFP_KERNEL);
 
 	if (gnttab_alloc_pages(1, &shared_ring)) {
-		return -EINVAL;
+		return -ENOMEM;
 	}
 
 	gnttab_set_map_op(&map_ops[0], (unsigned long)pfn_to_kaddr(page_to_pfn(shared_ring)),
@@ -399,12 +399,12 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	ret = gnttab_map_refs(map_ops, NULL, &shared_ring, 1);
 	if (ret < 0) {
 		dev_err(hyper_dmabuf_private.device, "Cannot map ring\n");
-		return -EINVAL;
+		return -EFAULT;
 	}
 
 	if (map_ops[0].status) {
 		dev_err(hyper_dmabuf_private.device, "Ring mapping failed\n");
-		return -EINVAL;
+		return -EFAULT;
 	} else {
 		ring_info->unmap_op.handle = map_ops[0].handle;
 	}
@@ -418,7 +418,7 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	ret = bind_interdomain_evtchn_to_irq(domid, rx_port);
 
 	if (ret < 0) {
-		return -EINVAL;
+		return -EIO;
 	}
 
 	ring_info->irq = ret;
@@ -511,7 +511,7 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 	if (!ring_info) {
 		dev_err(hyper_dmabuf_private.device,
 			"Can't find ring info for the channel\n");
-		return -EINVAL;
+		return -ENOENT;
 	}
 
 

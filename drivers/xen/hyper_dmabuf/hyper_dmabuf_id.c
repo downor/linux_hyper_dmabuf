@@ -62,7 +62,7 @@ static int retrieve_reusable_id(void)
 		return id;
 	}
 
-	return -1;
+	return -ENOENT;
 }
 
 void destroy_reusable_list(void)

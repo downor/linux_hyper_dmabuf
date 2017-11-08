@@ -110,7 +110,7 @@ int xen_comm_remove_tx_ring(int domid)
 			return 0;
 		}
 
-	return -1;
+	return -ENOENT;
 }
 
 int xen_comm_remove_rx_ring(int domid)
@@ -125,7 +125,7 @@ int xen_comm_remove_rx_ring(int domid)
 			return 0;
 		}
 
-	return -1;
+	return -ENOENT;
 }
 
 void xen_comm_foreach_tx_ring(void (*func)(int domid))
