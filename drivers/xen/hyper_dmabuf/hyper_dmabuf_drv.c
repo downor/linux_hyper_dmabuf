@@ -54,7 +54,7 @@ static int __init hyper_dmabuf_drv_init(void)
 {
 	int ret = 0;
 
-	printk( KERN_NOTICE "hyper_dmabuf_starting: Initialization started" );
+	printk( KERN_NOTICE "hyper_dmabuf_starting: Initialization started\n");
 
 	mutex_init(&hyper_dmabuf_private.lock);
 
@@ -122,7 +122,9 @@ static void hyper_dmabuf_drv_exit(void)
 	if (hyper_dmabuf_private.id_queue)
 		destroy_reusable_list();
 
-	printk( KERN_NOTICE "dma_buf-src_sink model: Exiting" );
+	dev_info(hyper_dmabuf_private.device,
+		 "hyper_dmabuf driver: Exiting\n");
+
 	unregister_device();
 }
 /*===============================================================================================*/

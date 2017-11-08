@@ -221,3 +221,17 @@ int hyper_dmabuf_remove_imported(int id)
 
 	return -ENOENT;
 }
+
+void hyper_dmabuf_foreach_exported(
+	void (*func)(struct hyper_dmabuf_sgt_info *, void *attr),
+	void *attr)
+{
+	struct hyper_dmabuf_info_entry_exported *info_entry;
+	struct hlist_node *tmp;
+	int bkt;
+
+	hash_for_each_safe(hyper_dmabuf_hash_exported, bkt, tmp,
+			info_entry, node) {
+		func(info_entry->info, attr);
+	}
+}
