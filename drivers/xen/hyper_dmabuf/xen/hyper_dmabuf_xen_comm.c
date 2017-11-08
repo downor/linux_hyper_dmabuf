@@ -32,6 +32,7 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
+#include <linux/time.h>
 #include <xen/grant_table.h>
 #include <xen/events.h>
 #include <xen/xenbus.h>
@@ -474,6 +475,8 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 			  back_ring_isr, 0,
 			  NULL, (void*)ring_info);
 
+	return ret;
+
 fail_others:
 	kfree(map_ops);
 
@@ -545,6 +548,10 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 	struct hyper_dmabuf_req *new_req;
 	struct xen_comm_tx_ring_info *ring_info;
 	int notify;
+
+	struct timeval tv_start, tv_end;
+	struct timeval tv_diff;
+
 	int timeout = 1000;
 
 	/* find a ring info for the channel */
@@ -559,7 +566,11 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 
 	ring = &ring_info->ring_front;
 
+	do_gettimeofday(&tv_start);
+
 	while (RING_FULL(ring)) {
+		dev_dbg(hyper_dmabuf_private.device, "RING_FULL\n");
+
 		if (timeout == 0) {
 			dev_err(hyper_dmabuf_private.device,
 				"Timeout while waiting for an entry in the ring\n");
@@ -609,6 +620,21 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 		}
 
 		mutex_unlock(&ring_info->lock);
+		do_gettimeofday(&tv_end);
+
+		/* checking time duration for round-trip of a request for debugging */
+		if (tv_end.tv_usec >= tv_start.tv_usec) {
+			tv_diff.tv_sec = tv_end.tv_sec-tv_start.tv_sec;
+			tv_diff.tv_usec = tv_end.tv_usec-tv_start.tv_usec;
+		} else {
+			tv_diff.tv_sec = tv_end.tv_sec-tv_start.tv_sec-1;
+			tv_diff.tv_usec = tv_end.tv_usec+1000000-tv_start.tv_usec;
+		}
+
+		if (tv_diff.tv_sec != 0 && tv_diff.tv_usec > 16000)
+			dev_dbg(hyper_dmabuf_private.device, "send_req:time diff: %ld sec, %ld usec\n",
+				tv_diff.tv_sec, tv_diff.tv_usec);
+
 		return req_pending.status;
 	}
 
@@ -657,6 +683,10 @@ static irqreturn_t back_ring_isr(int irq, void *info)
 							sizeof(resp));
 				ring->rsp_prod_pvt++;
 
+				dev_dbg(hyper_dmabuf_private.device,
+					"sending response to exporter for request id:%d\n",
+					resp.response_id);
+
 				RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
 
 				if (notify) {
@@ -696,8 +726,13 @@ static irqreturn_t front_ring_isr(int irq, void *info)
 			/* update pending request's status with what is
 			 * in the response
 			 */
-			if (req_pending.request_id == resp->response_id)
+
+			dev_dbg(hyper_dmabuf_private.device,
+				"getting response from importer\n");
+
+			if (req_pending.request_id == resp->response_id) {
 				req_pending.status = resp->status;
+			}
 
 			if (resp->status == HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP) {
 				/* parsing response */

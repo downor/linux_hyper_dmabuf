@@ -30,7 +30,10 @@
 #include <linux/module.h>
 #include <linux/miscdevice.h>
 #include <linux/workqueue.h>
+#include <linux/slab.h>
 #include <linux/device.h>
+#include <linux/uaccess.h>
+#include <linux/poll.h>
 #include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_conf.h"
@@ -38,6 +41,7 @@
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
+#include "hyper_dmabuf_event.h"
 
 #ifdef CONFIG_HYPER_DMABUF_XEN
 #include "xen/hyper_dmabuf_xen_drv.h"
@@ -64,7 +68,7 @@ int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 		return -EBUSY;
 
 	/*
-	 * Initialize backend if neededm,
+	 * Initialize backend if needed,
 	 * use mutex to prevent race conditions when
 	 * two userspace apps will open device at the same time
 	 */
@@ -91,6 +95,112 @@ int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 {
 	hyper_dmabuf_foreach_exported(hyper_dmabuf_emergency_release, filp);
 
+	/* clean up event queue */
+	hyper_dmabuf_events_release();
+
+	return 0;
+}
+
+unsigned int hyper_dmabuf_event_poll(struct file *filp, struct poll_table_struct *wait)
+{
+	unsigned int mask = 0;
+
+	poll_wait(filp, &hyper_dmabuf_private.event_wait, wait);
+
+	if (!list_empty(&hyper_dmabuf_private.event_list))
+		mask |= POLLIN | POLLRDNORM;
+
+	return mask;
+}
+
+ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
+		size_t count, loff_t *offset)
+{
+	int ret;
+
+	/* only root can read events */
+	if (!capable(CAP_DAC_OVERRIDE))
+		return -EFAULT;
+
+	/* make sure user buffer can be written */
+	if (!access_ok(VERIFY_WRITE, buffer, count))
+		return -EFAULT;
+
+	ret = mutex_lock_interruptible(&hyper_dmabuf_private.event_read_lock);
+	if (ret)
+		return ret;
+
+	while (1) {
+		struct hyper_dmabuf_event *e = NULL;
+
+		spin_lock_irq(&hyper_dmabuf_private.event_lock);
+		if (!list_empty(&hyper_dmabuf_private.event_list)) {
+			e = list_first_entry(&hyper_dmabuf_private.event_list,
+					struct hyper_dmabuf_event, link);
+			list_del(&e->link);
+		}
+		spin_unlock_irq(&hyper_dmabuf_private.event_lock);
+
+		if (!e) {
+			if (ret)
+				break;
+			if (filp->f_flags & O_NONBLOCK) {
+				ret = -EAGAIN;
+				break;
+			}
+
+			mutex_unlock(&hyper_dmabuf_private.event_read_lock);
+			ret = wait_event_interruptible(hyper_dmabuf_private.event_wait,
+						       !list_empty(&hyper_dmabuf_private.event_list));
+
+			if (ret >= 0)
+				ret = mutex_lock_interruptible(&hyper_dmabuf_private.event_read_lock);
+
+			if (ret)
+				return ret;
+		} else {
+			unsigned length = (sizeof(struct hyper_dmabuf_event_hdr) + e->event_data.hdr.size);
+
+			if (length > count - ret) {
+put_back_event:
+				spin_lock_irq(&hyper_dmabuf_private.event_lock);
+				list_add(&e->link, &hyper_dmabuf_private.event_list);
+				spin_unlock_irq(&hyper_dmabuf_private.event_lock);
+				break;
+			}
+
+			if (copy_to_user(buffer + ret, &e->event_data.hdr,
+					 sizeof(struct hyper_dmabuf_event_hdr))) {
+				if (ret == 0)
+					ret = -EFAULT;
+
+				goto put_back_event;
+			}
+
+			ret += sizeof(struct hyper_dmabuf_event_hdr);
+
+			if (copy_to_user(buffer + ret, e->event_data.data, e->event_data.hdr.size)) {
+				/* error while copying void *data */
+
+				struct hyper_dmabuf_event_hdr dummy_hdr = {0};
+				ret -= sizeof(struct hyper_dmabuf_event_hdr);
+
+				/* nullifying hdr of the event in user buffer */
+				copy_to_user(buffer + ret, &dummy_hdr,
+					     sizeof(dummy_hdr));
+
+				ret = -EFAULT;
+
+				goto put_back_event;
+			}
+
+			ret += e->event_data.hdr.size;
+			kfree(e);
+		}
+	}
+
+	mutex_unlock(&hyper_dmabuf_private.event_read_lock);
+
 	return 0;
 }
 
@@ -99,6 +209,8 @@ static struct file_operations hyper_dmabuf_driver_fops =
 	.owner = THIS_MODULE,
 	.open = hyper_dmabuf_open,
 	.release = hyper_dmabuf_release,
+	.read = hyper_dmabuf_event_read,
+	.poll = hyper_dmabuf_event_poll,
 	.unlocked_ioctl = hyper_dmabuf_ioctl,
 };
 
@@ -183,6 +295,12 @@ static int __init hyper_dmabuf_drv_init(void)
 		return ret;
 	}
 #endif
+
+	/* Initialize event queue */
+	INIT_LIST_HEAD(&hyper_dmabuf_private.event_list);
+	init_waitqueue_head(&hyper_dmabuf_private.event_wait);
+
+	hyper_dmabuf_private.curr_num_event = 0;
 
 	/* interrupt for comm should be registered here: */
 	return ret;

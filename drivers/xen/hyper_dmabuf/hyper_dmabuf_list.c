@@ -37,6 +37,7 @@
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
+#include "hyper_dmabuf_event.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 

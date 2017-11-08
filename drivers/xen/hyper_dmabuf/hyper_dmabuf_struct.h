@@ -90,7 +90,7 @@ struct hyper_dmabuf_sgt_info {
 	 * uses releases hyper_dmabuf device
 	 */
 	struct file *filp;
-	int priv[4]; /* device specific info (e.g. image's meta info?) */
+	int priv[32]; /* device specific info (e.g. image's meta info?) */
 };
 
 /* Importer store references (before mapping) on shared pages
@@ -110,7 +110,7 @@ struct hyper_dmabuf_imported_sgt_info {
 	void *refs_info;
 	bool valid;
 	int num_importers;
-	int private[4]; /* device specific info (e.g. image's meta info?) */
+	int priv[32]; /* device specific info (e.g. image's meta info?) */
 };
 
 #endif /* __HYPER_DMABUF_STRUCT_H__ */

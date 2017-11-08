@@ -36,6 +36,7 @@
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_remote_sync.h"
+#include "hyper_dmabuf_event.h"
 #include "hyper_dmabuf_list.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
@@ -64,10 +65,10 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 		 * operands5 : offset of data in the first page
 		 * operands6 : length of data in the last page
 		 * operands7 : top-level reference number for shared pages
-		 * operands8~11 : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * operands8~39 : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
-		for (i=0; i < 11; i++)
-			req->operands[i] = operands[i];
+
+		memcpy(&req->operands[0], &operands[0], 40 * sizeof(int));
 		break;
 
 	case HYPER_DMABUF_NOTIFY_UNEXPORT:
@@ -136,6 +137,32 @@ void cmd_process_work(struct work_struct *work)
 		 * operands7 : top-level reference number for shared pages
 		 * operands8~11 : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
+
+		/* if nents == 0, it means it is a message only for priv synchronization
+		 * for existing imported_sgt_info so not creating a new one */
+		if (req->operands[4] == 0) {
+			hyper_dmabuf_id_t exist = {req->operands[0],
+						   {req->operands[1], req->operands[2],
+						    req->operands[3]}};
+
+			imported_sgt_info = hyper_dmabuf_find_imported(exist);
+
+			if (!imported_sgt_info) {
+				dev_err(hyper_dmabuf_private.device,
+					"Can't find imported sgt_info from IMPORT_LIST\n");
+				break;
+			}
+			/* updating pri data */
+			memcpy(&imported_sgt_info->priv[0], &req->operands[8], 32 * sizeof(int));
+
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+			/* generating import event */
+			hyper_dmabuf_import_event(imported_sgt_info->hid);
+#endif
+
+			break;
+		}
+
 		imported_sgt_info = kcalloc(1, sizeof(*imported_sgt_info), GFP_KERNEL);
 
 		if (!imported_sgt_info) {
@@ -163,12 +190,17 @@ void cmd_process_work(struct work_struct *work)
 		dev_dbg(hyper_dmabuf_private.device, "\tlast len %d\n", req->operands[6]);
 		dev_dbg(hyper_dmabuf_private.device, "\tgrefid %d\n", req->operands[7]);
 
-		for (i=0; i<4; i++)
-			imported_sgt_info->private[i] = req->operands[8+i];
+		memcpy(&imported_sgt_info->priv[0], &req->operands[8], 32 * sizeof(int));
 
 		imported_sgt_info->valid = 1;
 		hyper_dmabuf_register_imported(imported_sgt_info);
-	break;
+
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+		/* generating import event */
+		hyper_dmabuf_import_event(imported_sgt_info->hid);
+#endif
+
+		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
 		/* notifying dmabuf map/unmap to importer (probably not needed) */
