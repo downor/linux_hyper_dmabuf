@@ -149,6 +149,11 @@ reexport:
 
 	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
 
+	if (IS_ERR(sgt)) {
+		dev_err(hyper_dmabuf_private.device, "Cannot map attachment\n");
+		return PTR_ERR(sgt);
+	}
+
 	sgt_info = kcalloc(1, sizeof(*sgt_info), GFP_KERNEL);
 
 	if(!sgt_info) {
