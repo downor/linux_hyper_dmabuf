@@ -80,6 +80,13 @@ struct hyper_dmabuf_sgt_info {
 	void *refs_info; /* hypervisor-specific info for the references */
 	struct delayed_work unexport_work;
 	bool unexport_scheduled;
+	/* owner of buffer
+	 * TODO: that is naiive as buffer may be reused by
+	 * another userspace app, so here list of struct file should be kept
+	 * and emergency unexport should be executed only after last of buffer
+	 * uses releases hyper_dmabuf device
+	 */
+	struct file *filp;
 	int private[4]; /* device specific info (e.g. image's meta info?) */
 };
 

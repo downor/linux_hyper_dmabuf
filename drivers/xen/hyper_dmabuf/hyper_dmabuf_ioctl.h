@@ -25,7 +25,7 @@
 #ifndef __HYPER_DMABUF_IOCTL_H__
 #define __HYPER_DMABUF_IOCTL_H__
 
-typedef int (*hyper_dmabuf_ioctl_t)(void *data);
+typedef int (*hyper_dmabuf_ioctl_t)(struct file *filp, void *data);
 
 struct hyper_dmabuf_ioctl_desc {
 	unsigned int cmd;

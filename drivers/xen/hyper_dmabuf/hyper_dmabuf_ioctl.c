@@ -47,7 +47,7 @@
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
-static int hyper_dmabuf_tx_ch_setup(void *data)
+static int hyper_dmabuf_tx_ch_setup(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_tx_ch_setup *tx_ch_attr;
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
@@ -64,7 +64,7 @@ static int hyper_dmabuf_tx_ch_setup(void *data)
 	return ret;
 }
 
-static int hyper_dmabuf_rx_ch_setup(void *data)
+static int hyper_dmabuf_rx_ch_setup(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_rx_ch_setup *rx_ch_attr;
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
@@ -82,7 +82,7 @@ static int hyper_dmabuf_rx_ch_setup(void *data)
 	return ret;
 }
 
-static int hyper_dmabuf_export_remote(void *data)
+static int hyper_dmabuf_export_remote(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_export_remote *export_remote_attr;
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
@@ -227,6 +227,8 @@ reexport:
 	kfree(page_info->pages);
 	kfree(page_info);
 
+	sgt_info->filp = filp;
+
 	return ret;
 
 fail_send_request:
@@ -248,7 +250,7 @@ fail_export:
 	return ret;
 }
 
-static int hyper_dmabuf_export_fd_ioctl(void *data)
+static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_export_fd *export_fd_attr;
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
@@ -411,7 +413,7 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 
 /* Schedules unexport of dmabuf.
  */
-static int hyper_dmabuf_unexport(void *data)
+static int hyper_dmabuf_unexport(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_unexport *unexport_attr;
 	struct hyper_dmabuf_sgt_info *sgt_info;
@@ -448,7 +450,7 @@ static int hyper_dmabuf_unexport(void *data)
 	return 0;
 }
 
-static int hyper_dmabuf_query(void *data)
+static int hyper_dmabuf_query(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_query *query_attr;
 	struct hyper_dmabuf_sgt_info *sgt_info;
@@ -558,7 +560,7 @@ static long hyper_dmabuf_ioctl(struct file *filp,
 		return -EFAULT;
 	}
 
-	ret = func(kdata);
+	ret = func(filp, kdata);
 
 	if (copy_to_user((void __user *)param, kdata, _IOC_SIZE(cmd)) != 0) {
 		dev_err(hyper_dmabuf_private.device, "failed to copy to user arguments\n");
@@ -570,14 +572,49 @@ static long hyper_dmabuf_ioctl(struct file *filp,
 	return ret;
 }
 
-struct device_info {
-	int curr_domain;
-};
+int hyper_dmabuf_open(struct inode *inode, struct file *filp)
+{
+	/* Do not allow exclusive open */
+	if (filp->f_flags & O_EXCL)
+		return -EBUSY;
+
+	return 0;
+}
+
+static void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_info,
+					   void *attr)
+{
+	struct ioctl_hyper_dmabuf_unexport unexport_attr;
+	struct file *filp = (struct file*) attr;
+
+	if (!filp || !sgt_info)
+		return;
+
+	if (sgt_info->filp == filp) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"Executing emergency release of buffer %d\n",
+			 sgt_info->hyper_dmabuf_id);
+
+		unexport_attr.hyper_dmabuf_id = sgt_info->hyper_dmabuf_id;
+		unexport_attr.delay_ms = 0;
+
+		hyper_dmabuf_unexport(filp, &unexport_attr);
+	}
+}
+
+int hyper_dmabuf_release(struct inode *inode, struct file *filp)
+{
+	hyper_dmabuf_foreach_exported(hyper_dmabuf_emergency_release, filp);
+
+	return 0;
+}
 
 /*===============================================================================================*/
 static struct file_operations hyper_dmabuf_driver_fops =
 {
    .owner = THIS_MODULE,
+   .open = hyper_dmabuf_open,
+   .release = hyper_dmabuf_release,
    .unlocked_ioctl = hyper_dmabuf_ioctl,
 };
 
@@ -597,7 +634,7 @@ int register_device(void)
 	ret = misc_register(&hyper_dmabuf_miscdev);
 
 	if (ret) {
-		printk(KERN_WARNING "hyper_dmabuf: driver can't be registered\n");
+		printk(KERN_ERR "hyper_dmabuf: driver can't be registered\n");
 		return ret;
 	}
 
@@ -606,22 +643,14 @@ int register_device(void)
 	/* TODO: Check if there is a different way to initialize dma mask nicely */
 	dma_coerce_mask_and_coherent(hyper_dmabuf_private.device, 0xFFFFFFFF);
 
-	/* TODO find a way to provide parameters for below function or move that to ioctl */
-/*	err = bind_interdomain_evtchn_to_irqhandler(rdomain, evtchn,
-				src_sink_isr, PORT_NUM, "remote_domain", &info);
-	if (err < 0) {
-		printk("hyper_dmabuf: can't register interrupt handlers\n");
-		return -EFAULT;
-	}
-
-	info.irq = err;
-*/
 	return ret;
 }
 
 /*-----------------------------------------------------------------------------------------------*/
 void unregister_device(void)
 {
-	printk( KERN_NOTICE "hyper_dmabuf: unregister_device() is called" );
+	dev_info(hyper_dmabuf_private.device,
+		 "hyper_dmabuf: unregister_device() is called\n");
+
 	misc_deregister(&hyper_dmabuf_miscdev);
 }
