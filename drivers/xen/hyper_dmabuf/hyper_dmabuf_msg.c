@@ -35,7 +35,6 @@
 #include <linux/workqueue.h>
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
-#include "hyper_dmabuf_imp.h"
 #include "hyper_dmabuf_remote_sync.h"
 #include "hyper_dmabuf_list.h"
 

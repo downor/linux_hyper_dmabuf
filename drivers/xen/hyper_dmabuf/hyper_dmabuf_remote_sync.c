@@ -37,7 +37,7 @@
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_msg.h"
-#include "hyper_dmabuf_imp.h"
+#include "hyper_dmabuf_sgl_proc.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 

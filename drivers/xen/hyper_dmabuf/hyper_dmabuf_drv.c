@@ -28,10 +28,13 @@
 
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/miscdevice.h>
 #include <linux/workqueue.h>
 #include <linux/device.h>
+#include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_conf.h"
+#include "hyper_dmabuf_ioctl.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
@@ -44,12 +47,94 @@ extern struct hyper_dmabuf_backend_ops xen_backend_ops;
 MODULE_LICENSE("GPL and additional rights");
 MODULE_AUTHOR("Intel Corporation");
 
-int register_device(void);
-int unregister_device(void);
-
 struct hyper_dmabuf_private hyper_dmabuf_private;
 
-/*===============================================================================================*/
+long hyper_dmabuf_ioctl(struct file *filp,
+			unsigned int cmd, unsigned long param);
+
+void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_info,
+				    void *attr);
+
+int hyper_dmabuf_open(struct inode *inode, struct file *filp)
+{
+	int ret = 0;
+
+	/* Do not allow exclusive open */
+	if (filp->f_flags & O_EXCL)
+		return -EBUSY;
+
+	/*
+	 * Initialize backend if neededm,
+	 * use mutex to prevent race conditions when
+	 * two userspace apps will open device at the same time
+	 */
+	mutex_lock(&hyper_dmabuf_private.lock);
+
+	if (!hyper_dmabuf_private.backend_initialized) {
+		hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
+
+		ret = hyper_dmabuf_private.backend_ops->init_comm_env();
+	        if (ret < 0) {
+			dev_err(hyper_dmabuf_private.device,
+				"failed to initiailize hypervisor-specific comm env\n");
+		} else {
+			hyper_dmabuf_private.backend_initialized = true;
+		}
+	}
+
+	mutex_unlock(&hyper_dmabuf_private.lock);
+
+	return ret;
+}
+
+int hyper_dmabuf_release(struct inode *inode, struct file *filp)
+{
+	hyper_dmabuf_foreach_exported(hyper_dmabuf_emergency_release, filp);
+
+	return 0;
+}
+
+static struct file_operations hyper_dmabuf_driver_fops =
+{
+	.owner = THIS_MODULE,
+	.open = hyper_dmabuf_open,
+	.release = hyper_dmabuf_release,
+	.unlocked_ioctl = hyper_dmabuf_ioctl,
+};
+
+static struct miscdevice hyper_dmabuf_miscdev = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "xen/hyper_dmabuf",
+	.fops = &hyper_dmabuf_driver_fops,
+};
+
+int register_device(void)
+{
+	int ret = 0;
+
+	ret = misc_register(&hyper_dmabuf_miscdev);
+
+	if (ret) {
+		printk(KERN_ERR "hyper_dmabuf: driver can't be registered\n");
+		return ret;
+	}
+
+	hyper_dmabuf_private.device = hyper_dmabuf_miscdev.this_device;
+
+	/* TODO: Check if there is a different way to initialize dma mask nicely */
+	dma_coerce_mask_and_coherent(hyper_dmabuf_private.device, DMA_BIT_MASK(64));
+
+	return ret;
+}
+
+void unregister_device(void)
+{
+	dev_info(hyper_dmabuf_private.device,
+		"hyper_dmabuf: unregister_device() is called\n");
+
+	misc_deregister(&hyper_dmabuf_miscdev);
+}
+
 static int __init hyper_dmabuf_drv_init(void)
 {
 	int ret = 0;
@@ -103,7 +188,6 @@ static int __init hyper_dmabuf_drv_init(void)
 	return ret;
 }
 
-/*-----------------------------------------------------------------------------------------------*/
 static void hyper_dmabuf_drv_exit(void)
 {
 #ifdef CONFIG_HYPER_DMABUF_SYSFS
@@ -128,7 +212,6 @@ static void hyper_dmabuf_drv_exit(void)
 
 	unregister_device();
 }
-/*===============================================================================================*/
 
 module_init(hyper_dmabuf_drv_init);
 module_exit(hyper_dmabuf_drv_exit);
