@@ -41,7 +41,8 @@
 #include "hyper_dmabuf_ioctl.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_msg.h"
-#include "hyper_dmabuf_imp.h"
+#include "hyper_dmabuf_sgl_proc.h"
+#include "hyper_dmabuf_ops.h"
 #include "hyper_dmabuf_query.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
@@ -618,7 +619,29 @@ static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
 	return 0;
 }
 
-static const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
+void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_info,
+				    void *attr)
+{
+	struct ioctl_hyper_dmabuf_unexport unexport_attr;
+	struct file *filp = (struct file*) attr;
+
+	if (!filp || !sgt_info)
+		return;
+
+	if (sgt_info->filp == filp) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"Executing emergency release of buffer {id:%d key:%d %d %d}\n",
+			 sgt_info->hid.id, sgt_info->hid.rng_key[0],
+			 sgt_info->hid.rng_key[1], sgt_info->hid.rng_key[2]);
+
+		unexport_attr.hid = sgt_info->hid;
+		unexport_attr.delay_ms = 0;
+
+		hyper_dmabuf_unexport_ioctl(filp, &unexport_attr);
+	}
+}
+
+const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_TX_CH_SETUP, hyper_dmabuf_tx_ch_setup_ioctl, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_RX_CH_SETUP, hyper_dmabuf_rx_ch_setup_ioctl, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_REMOTE, hyper_dmabuf_export_remote_ioctl, 0),
@@ -627,7 +650,7 @@ static const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY, hyper_dmabuf_query_ioctl, 0),
 };
 
-static long hyper_dmabuf_ioctl(struct file *filp,
+long hyper_dmabuf_ioctl(struct file *filp,
 			unsigned int cmd, unsigned long param)
 {
 	const struct hyper_dmabuf_ioctl_desc *ioctl = NULL;
@@ -671,111 +694,4 @@ static long hyper_dmabuf_ioctl(struct file *filp,
 	kfree(kdata);
 
 	return ret;
-}
-
-int hyper_dmabuf_open(struct inode *inode, struct file *filp)
-{
-	int ret = 0;
-
-	/* Do not allow exclusive open */
-	if (filp->f_flags & O_EXCL)
-		return -EBUSY;
-
-	/*
-	 * Initialize backend if neededm,
-	 * use mutex to prevent race conditions when
-	 * two userspace apps will open device at the same time
-	 */
-	mutex_lock(&hyper_dmabuf_private.lock);
-
-	if (!hyper_dmabuf_private.backend_initialized) {
-		hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
-
-		ret = hyper_dmabuf_private.backend_ops->init_comm_env();
-	        if (ret < 0) {
-			dev_err(hyper_dmabuf_private.device,
-				"failed to initiailize hypervisor-specific comm env\n");
-		} else {
-			hyper_dmabuf_private.backend_initialized = true;
-		}
-	}
-
-	mutex_unlock(&hyper_dmabuf_private.lock);
-
-	return ret;
-}
-
-static void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_info,
-					   void *attr)
-{
-	struct ioctl_hyper_dmabuf_unexport unexport_attr;
-	struct file *filp = (struct file*) attr;
-
-	if (!filp || !sgt_info)
-		return;
-
-	if (sgt_info->filp == filp) {
-		dev_dbg(hyper_dmabuf_private.device,
-			"Executing emergency release of buffer {id:%d key:%d %d %d}\n",
-			 sgt_info->hid.id, sgt_info->hid.rng_key[0],
-			 sgt_info->hid.rng_key[1], sgt_info->hid.rng_key[2]);
-
-		unexport_attr.hid = sgt_info->hid;
-		unexport_attr.delay_ms = 0;
-
-		hyper_dmabuf_unexport_ioctl(filp, &unexport_attr);
-	}
-}
-
-int hyper_dmabuf_release(struct inode *inode, struct file *filp)
-{
-	hyper_dmabuf_foreach_exported(hyper_dmabuf_emergency_release, filp);
-
-	return 0;
-}
-
-/*===============================================================================================*/
-static struct file_operations hyper_dmabuf_driver_fops =
-{
-   .owner = THIS_MODULE,
-   .open = hyper_dmabuf_open,
-   .release = hyper_dmabuf_release,
-   .unlocked_ioctl = hyper_dmabuf_ioctl,
-};
-
-static struct miscdevice hyper_dmabuf_miscdev = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "xen/hyper_dmabuf",
-	.fops = &hyper_dmabuf_driver_fops,
-};
-
-static const char device_name[] = "hyper_dmabuf";
-
-/*===============================================================================================*/
-int register_device(void)
-{
-	int ret = 0;
-
-	ret = misc_register(&hyper_dmabuf_miscdev);
-
-	if (ret) {
-		printk(KERN_ERR "hyper_dmabuf: driver can't be registered\n");
-		return ret;
-	}
-
-	hyper_dmabuf_private.device = hyper_dmabuf_miscdev.this_device;
-
-	/* TODO: Check if there is a different way to initialize dma mask nicely */
-	dma_coerce_mask_and_coherent(hyper_dmabuf_private.device, DMA_BIT_MASK(64));
-
-	return ret;
-}
-
-/*-----------------------------------------------------------------------------------------------*/
-void unregister_device(void)
-{
-	dev_info(hyper_dmabuf_private.device,
-		 "hyper_dmabuf: unregister_device() is called\n");
-
-	misc_deregister(&hyper_dmabuf_miscdev);
 }

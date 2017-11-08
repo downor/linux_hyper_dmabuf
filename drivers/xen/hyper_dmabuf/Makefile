@@ -7,7 +7,8 @@ ifneq ($(KERNELRELEASE),)
 	$(TARGET_MODULE)-objs := hyper_dmabuf_drv.o \
                                  hyper_dmabuf_ioctl.o \
                                  hyper_dmabuf_list.o \
-				 hyper_dmabuf_imp.o \
+				 hyper_dmabuf_sgl_proc.o \
+				 hyper_dmabuf_ops.o \
 				 hyper_dmabuf_msg.o \
 				 hyper_dmabuf_id.o \
 				 hyper_dmabuf_remote_sync.o \
