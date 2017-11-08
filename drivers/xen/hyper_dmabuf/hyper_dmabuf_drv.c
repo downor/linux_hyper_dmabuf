@@ -36,7 +36,6 @@
 #include <linux/poll.h>
 #include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
-#include "hyper_dmabuf_conf.h"
 #include "hyper_dmabuf_ioctl.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
@@ -51,13 +50,32 @@ extern struct hyper_dmabuf_backend_ops xen_backend_ops;
 MODULE_LICENSE("GPL and additional rights");
 MODULE_AUTHOR("Intel Corporation");
 
-struct hyper_dmabuf_private hyper_dmabuf_private;
+struct hyper_dmabuf_private *hy_drv_priv;
 
 long hyper_dmabuf_ioctl(struct file *filp,
 			unsigned int cmd, unsigned long param);
 
-void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_info,
-				    void *attr);
+static void hyper_dmabuf_force_free(struct exported_sgt_info* exported,
+			            void *attr)
+{
+	struct ioctl_hyper_dmabuf_unexport unexport_attr;
+	struct file *filp = (struct file*) attr;
+
+	if (!filp || !exported)
+		return;
+
+	if (exported->filp == filp) {
+		dev_dbg(hy_drv_priv->dev,
+			"Forcefully releasing buffer {id:%d key:%d %d %d}\n",
+			 exported->hid.id, exported->hid.rng_key[0],
+			 exported->hid.rng_key[1], exported->hid.rng_key[2]);
+
+		unexport_attr.hid = exported->hid;
+		unexport_attr.delay_ms = 0;
+
+		hyper_dmabuf_unexport_ioctl(filp, &unexport_attr);
+	}
+}
 
 int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 {
@@ -72,18 +90,20 @@ int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 
 int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 {
-	hyper_dmabuf_foreach_exported(hyper_dmabuf_emergency_release, filp);
+	hyper_dmabuf_foreach_exported(hyper_dmabuf_force_free, filp);
 
 	return 0;
 }
+
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 
 unsigned int hyper_dmabuf_event_poll(struct file *filp, struct poll_table_struct *wait)
 {
 	unsigned int mask = 0;
 
-	poll_wait(filp, &hyper_dmabuf_private.event_wait, wait);
+	poll_wait(filp, &hy_drv_priv->event_wait, wait);
 
-	if (!list_empty(&hyper_dmabuf_private.event_list))
+	if (!list_empty(&hy_drv_priv->event_list))
 		mask |= POLLIN | POLLRDNORM;
 
 	return mask;
@@ -96,32 +116,32 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 
 	/* only root can read events */
 	if (!capable(CAP_DAC_OVERRIDE)) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"Only root can read events\n");
 		return -EFAULT;
 	}
 
 	/* make sure user buffer can be written */
 	if (!access_ok(VERIFY_WRITE, buffer, count)) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"User buffer can't be written.\n");
 		return -EFAULT;
 	}
 
-	ret = mutex_lock_interruptible(&hyper_dmabuf_private.event_read_lock);
+	ret = mutex_lock_interruptible(&hy_drv_priv->event_read_lock);
 	if (ret)
 		return ret;
 
 	while (1) {
 		struct hyper_dmabuf_event *e = NULL;
 
-		spin_lock_irq(&hyper_dmabuf_private.event_lock);
-		if (!list_empty(&hyper_dmabuf_private.event_list)) {
-			e = list_first_entry(&hyper_dmabuf_private.event_list,
+		spin_lock_irq(&hy_drv_priv->event_lock);
+		if (!list_empty(&hy_drv_priv->event_list)) {
+			e = list_first_entry(&hy_drv_priv->event_list,
 					struct hyper_dmabuf_event, link);
 			list_del(&e->link);
 		}
-		spin_unlock_irq(&hyper_dmabuf_private.event_lock);
+		spin_unlock_irq(&hy_drv_priv->event_lock);
 
 		if (!e) {
 			if (ret)
@@ -131,12 +151,12 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 				break;
 			}
 
-			mutex_unlock(&hyper_dmabuf_private.event_read_lock);
-			ret = wait_event_interruptible(hyper_dmabuf_private.event_wait,
-						       !list_empty(&hyper_dmabuf_private.event_list));
+			mutex_unlock(&hy_drv_priv->event_read_lock);
+			ret = wait_event_interruptible(hy_drv_priv->event_wait,
+						       !list_empty(&hy_drv_priv->event_list));
 
 			if (ret == 0)
-				ret = mutex_lock_interruptible(&hyper_dmabuf_private.event_read_lock);
+				ret = mutex_lock_interruptible(&hy_drv_priv->event_read_lock);
 
 			if (ret)
 				return ret;
@@ -145,9 +165,9 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 
 			if (length > count - ret) {
 put_back_event:
-				spin_lock_irq(&hyper_dmabuf_private.event_lock);
-				list_add(&e->link, &hyper_dmabuf_private.event_list);
-				spin_unlock_irq(&hyper_dmabuf_private.event_lock);
+				spin_lock_irq(&hy_drv_priv->event_lock);
+				list_add(&e->link, &hy_drv_priv->event_list);
+				spin_unlock_irq(&hy_drv_priv->event_lock);
 				break;
 			}
 
@@ -170,7 +190,7 @@ put_back_event:
 				/* nullifying hdr of the event in user buffer */
 				if (copy_to_user(buffer + ret, &dummy_hdr,
 						 sizeof(dummy_hdr))) {
-					dev_err(hyper_dmabuf_private.device,
+					dev_err(hy_drv_priv->dev,
 						"failed to nullify invalid hdr already in userspace\n");
 				}
 
@@ -180,23 +200,30 @@ put_back_event:
 			}
 
 			ret += e->event_data.hdr.size;
-			hyper_dmabuf_private.curr_num_event--;
+			hy_drv_priv->pending--;
 			kfree(e);
 		}
 	}
 
-	mutex_unlock(&hyper_dmabuf_private.event_read_lock);
+	mutex_unlock(&hy_drv_priv->event_read_lock);
 
 	return ret;
 }
+
+#endif
 
 static struct file_operations hyper_dmabuf_driver_fops =
 {
 	.owner = THIS_MODULE,
 	.open = hyper_dmabuf_open,
 	.release = hyper_dmabuf_release,
+
+/* poll and read interfaces are needed only for event-polling */
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 	.read = hyper_dmabuf_event_read,
 	.poll = hyper_dmabuf_event_poll,
+#endif
+
 	.unlocked_ioctl = hyper_dmabuf_ioctl,
 };
 
@@ -217,17 +244,17 @@ int register_device(void)
 		return ret;
 	}
 
-	hyper_dmabuf_private.device = hyper_dmabuf_miscdev.this_device;
+	hy_drv_priv->dev = hyper_dmabuf_miscdev.this_device;
 
 	/* TODO: Check if there is a different way to initialize dma mask nicely */
-	dma_coerce_mask_and_coherent(hyper_dmabuf_private.device, DMA_BIT_MASK(64));
+	dma_coerce_mask_and_coherent(hy_drv_priv->dev, DMA_BIT_MASK(64));
 
 	return ret;
 }
 
 void unregister_device(void)
 {
-	dev_info(hyper_dmabuf_private.device,
+	dev_info(hy_drv_priv->dev,
 		"hyper_dmabuf: unregister_device() is called\n");
 
 	misc_deregister(&hyper_dmabuf_miscdev);
@@ -239,9 +266,13 @@ static int __init hyper_dmabuf_drv_init(void)
 
 	printk( KERN_NOTICE "hyper_dmabuf_starting: Initialization started\n");
 
-	mutex_init(&hyper_dmabuf_private.lock);
-	mutex_init(&hyper_dmabuf_private.event_read_lock);
-	spin_lock_init(&hyper_dmabuf_private.event_lock);
+	hy_drv_priv = kcalloc(1, sizeof(struct hyper_dmabuf_private),
+			      GFP_KERNEL);
+
+	if (!hy_drv_priv) {
+		printk( KERN_ERR "hyper_dmabuf: Failed to create drv\n");
+		return -1;
+	}
 
 	ret = register_device();
 	if (ret < 0) {
@@ -251,64 +282,72 @@ static int __init hyper_dmabuf_drv_init(void)
 /* currently only supports XEN hypervisor */
 
 #ifdef CONFIG_HYPER_DMABUF_XEN
-	hyper_dmabuf_private.backend_ops = &xen_backend_ops;
+	hy_drv_priv->backend_ops = &xen_backend_ops;
 #else
-	hyper_dmabuf_private.backend_ops = NULL;
+	hy_drv_priv->backend_ops = NULL;
 	printk( KERN_ERR "hyper_dmabuf drv currently supports XEN only.\n");
 #endif
 
-	if (hyper_dmabuf_private.backend_ops == NULL) {
+	if (hy_drv_priv->backend_ops == NULL) {
 		printk( KERN_ERR "Hyper_dmabuf: failed to be loaded - no backend found\n");
 		return -1;
 	}
 
-	mutex_lock(&hyper_dmabuf_private.lock);
+	/* initializing mutexes and a spinlock */
+	mutex_init(&hy_drv_priv->lock);
 
-	hyper_dmabuf_private.backend_initialized = false;
+	mutex_lock(&hy_drv_priv->lock);
 
-	dev_info(hyper_dmabuf_private.device,
+	hy_drv_priv->initialized = false;
+
+	dev_info(hy_drv_priv->dev,
 		 "initializing database for imported/exported dmabufs\n");
 
 	/* device structure initialization */
 	/* currently only does work-queue initialization */
-	hyper_dmabuf_private.work_queue = create_workqueue("hyper_dmabuf_wqueue");
+	hy_drv_priv->work_queue = create_workqueue("hyper_dmabuf_wqueue");
 
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"failed to initialize table for exported/imported entries\n");
 		return ret;
 	}
 
 #ifdef CONFIG_HYPER_DMABUF_SYSFS
-	ret = hyper_dmabuf_register_sysfs(hyper_dmabuf_private.device);
+	ret = hyper_dmabuf_register_sysfs(hy_drv_priv->dev);
 	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"failed to initialize sysfs\n");
 		return ret;
 	}
 #endif
 
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+	mutex_init(&hy_drv_priv->event_read_lock);
+	spin_lock_init(&hy_drv_priv->event_lock);
+
 	/* Initialize event queue */
-	INIT_LIST_HEAD(&hyper_dmabuf_private.event_list);
-	init_waitqueue_head(&hyper_dmabuf_private.event_wait);
+	INIT_LIST_HEAD(&hy_drv_priv->event_list);
+	init_waitqueue_head(&hy_drv_priv->event_wait);
 
-	hyper_dmabuf_private.curr_num_event = 0;
-	hyper_dmabuf_private.exited = false;
+	/* resetting number of pending events */
+	hy_drv_priv->pending = 0;
+#endif
 
-	hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
+	hy_drv_priv->domid = hy_drv_priv->backend_ops->get_vm_id();
 
-	ret = hyper_dmabuf_private.backend_ops->init_comm_env();
+	ret = hy_drv_priv->backend_ops->init_comm_env();
 	if (ret < 0) {
-		dev_dbg(hyper_dmabuf_private.device,
+		dev_dbg(hy_drv_priv->dev,
 			"failed to initialize comm-env but it will re-attempt.\n");
 	} else {
-		hyper_dmabuf_private.backend_initialized = true;
+		hy_drv_priv->initialized = true;
 	}
 
-	mutex_unlock(&hyper_dmabuf_private.lock);
+	mutex_unlock(&hy_drv_priv->lock);
 
-	dev_info(hyper_dmabuf_private.device,
+	dev_info(hy_drv_priv->dev,
 		"Finishing up initialization of hyper_dmabuf drv\n");
 
 	/* interrupt for comm should be registered here: */
@@ -318,33 +357,38 @@ static int __init hyper_dmabuf_drv_init(void)
 static void hyper_dmabuf_drv_exit(void)
 {
 #ifdef CONFIG_HYPER_DMABUF_SYSFS
-	hyper_dmabuf_unregister_sysfs(hyper_dmabuf_private.device);
+	hyper_dmabuf_unregister_sysfs(hy_drv_priv->dev);
 #endif
 
-	mutex_lock(&hyper_dmabuf_private.lock);
+	mutex_lock(&hy_drv_priv->lock);
 
 	/* hash tables for export/import entries and ring_infos */
 	hyper_dmabuf_table_destroy();
 
-	hyper_dmabuf_private.backend_ops->destroy_comm();
+	hy_drv_priv->backend_ops->destroy_comm();
 
 	/* destroy workqueue */
-	if (hyper_dmabuf_private.work_queue)
-		destroy_workqueue(hyper_dmabuf_private.work_queue);
+	if (hy_drv_priv->work_queue)
+		destroy_workqueue(hy_drv_priv->work_queue);
 
 	/* destroy id_queue */
-	if (hyper_dmabuf_private.id_queue)
+	if (hy_drv_priv->id_queue)
 		destroy_reusable_list();
 
-	hyper_dmabuf_private.exited = true;
-
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 	/* clean up event queue */
 	hyper_dmabuf_events_release();
+#endif
 
-	mutex_unlock(&hyper_dmabuf_private.lock);
+	mutex_unlock(&hy_drv_priv->lock);
 
-	dev_info(hyper_dmabuf_private.device,
+	dev_info(hy_drv_priv->dev,
 		 "hyper_dmabuf driver: Exiting\n");
+
+	if (hy_drv_priv) {
+		kfree(hy_drv_priv);
+		hy_drv_priv = NULL;
+	}
 
 	unregister_device();
 }

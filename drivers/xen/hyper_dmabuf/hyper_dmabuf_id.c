@@ -33,17 +33,15 @@
 #include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_msg.h"
 
-extern struct hyper_dmabuf_private hyper_dmabuf_private;
-
 void store_reusable_hid(hyper_dmabuf_id_t hid)
 {
-	struct list_reusable_id *reusable_head = hyper_dmabuf_private.id_queue;
+	struct list_reusable_id *reusable_head = hy_drv_priv->id_queue;
 	struct list_reusable_id *new_reusable;
 
 	new_reusable = kmalloc(sizeof(*new_reusable), GFP_KERNEL);
 
 	if (!new_reusable) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"No memory left to be allocated\n");
 		return;
 	}
@@ -55,7 +53,7 @@ void store_reusable_hid(hyper_dmabuf_id_t hid)
 
 static hyper_dmabuf_id_t retrieve_reusable_hid(void)
 {
-	struct list_reusable_id *reusable_head = hyper_dmabuf_private.id_queue;
+	struct list_reusable_id *reusable_head = hy_drv_priv->id_queue;
 	hyper_dmabuf_id_t hid = {-1, {0,0,0}};
 
 	/* check there is reusable id */
@@ -74,7 +72,7 @@ static hyper_dmabuf_id_t retrieve_reusable_hid(void)
 
 void destroy_reusable_list(void)
 {
-	struct list_reusable_id *reusable_head = hyper_dmabuf_private.id_queue;
+	struct list_reusable_id *reusable_head = hy_drv_priv->id_queue;
 	struct list_reusable_id *temp_head;
 
 	if (reusable_head) {
@@ -103,14 +101,14 @@ hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 		reusable_head = kmalloc(sizeof(*reusable_head), GFP_KERNEL);
 
 		if (!reusable_head) {
-			dev_err(hyper_dmabuf_private.device,
+			dev_err(hy_drv_priv->dev,
 				"No memory left to be allocated\n");
 			return (hyper_dmabuf_id_t){-1, {0,0,0}};
 		}
 
 		reusable_head->hid.id = -1; /* list head has an invalid count */
 		INIT_LIST_HEAD(&reusable_head->list);
-		hyper_dmabuf_private.id_queue = reusable_head;
+		hy_drv_priv->id_queue = reusable_head;
 	}
 
 	hid = retrieve_reusable_hid();
@@ -119,7 +117,7 @@ hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 	 * and count is less than maximum allowed
 	 */
 	if (hid.id == -1 && count < HYPER_DMABUF_ID_MAX) {
-		hid.id = HYPER_DMABUF_ID_CREATE(hyper_dmabuf_private.domid, count++);
+		hid.id = HYPER_DMABUF_ID_CREATE(hy_drv_priv->domid, count++);
 	}
 
 	/* random data embedded in the id for security */

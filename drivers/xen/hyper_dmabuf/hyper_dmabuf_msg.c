@@ -31,7 +31,6 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/dma-buf.h>
-#include <xen/grant_table.h>
 #include <linux/workqueue.h>
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
@@ -39,58 +38,56 @@
 #include "hyper_dmabuf_event.h"
 #include "hyper_dmabuf_list.h"
 
-extern struct hyper_dmabuf_private hyper_dmabuf_private;
-
 struct cmd_process {
 	struct work_struct work;
 	struct hyper_dmabuf_req *rq;
 	int domid;
 };
 
-void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
-				 enum hyper_dmabuf_command command, int *operands)
+void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
+			     enum hyper_dmabuf_command cmd, int *op)
 {
 	int i;
 
-	req->status = HYPER_DMABUF_REQ_NOT_RESPONDED;
-	req->command = command;
+	req->stat = HYPER_DMABUF_REQ_NOT_RESPONDED;
+	req->cmd = cmd;
 
-	switch(command) {
+	switch(cmd) {
 	/* as exporter, commands to importer */
 	case HYPER_DMABUF_EXPORT:
 		/* exporting pages for dmabuf */
 		/* command : HYPER_DMABUF_EXPORT,
-		 * operands0~3 : hyper_dmabuf_id
-		 * operands4 : number of pages to be shared
-		 * operands5 : offset of data in the first page
-		 * operands6 : length of data in the last page
-		 * operands7 : top-level reference number for shared pages
-		 * operands8 : size of private data (from operands9)
-		 * operands9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * op0~3 : hyper_dmabuf_id
+		 * op4 : number of pages to be shared
+		 * op5 : offset of data in the first page
+		 * op6 : length of data in the last page
+		 * op7 : top-level reference number for shared pages
+		 * op8 : size of private data (from op9)
+		 * op9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
 
-		memcpy(&req->operands[0], &operands[0], 9 * sizeof(int) + operands[8]);
+		memcpy(&req->op[0], &op[0], 9 * sizeof(int) + op[8]);
 		break;
 
 	case HYPER_DMABUF_NOTIFY_UNEXPORT:
 		/* destroy sg_list for hyper_dmabuf_id on remote side */
 		/* command : DMABUF_DESTROY,
-		 * operands0~3 : hyper_dmabuf_id_t hid
+		 * op0~3 : hyper_dmabuf_id_t hid
 		 */
 
 		for (i=0; i < 4; i++)
-			req->operands[i] = operands[i];
+			req->op[i] = op[i];
 		break;
 
 	case HYPER_DMABUF_EXPORT_FD:
 	case HYPER_DMABUF_EXPORT_FD_FAILED:
 		/* dmabuf fd is being created on imported side or importing failed */
 		/* command : HYPER_DMABUF_EXPORT_FD or HYPER_DMABUF_EXPORT_FD_FAILED,
-		 * operands0~3 : hyper_dmabuf_id
+		 * op0~3 : hyper_dmabuf_id
 		 */
 
 		for (i=0; i < 4; i++)
-			req->operands[i] = operands[i];
+			req->op[i] = op[i];
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
@@ -103,11 +100,11 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 		/* notifying dmabuf map/unmap to exporter, map will make the driver to do shadow mapping
 		* or unmapping for synchronization with original exporter (e.g. i915) */
 		/* command : DMABUF_OPS_TO_SOURCE.
-		 * operands0~3 : hyper_dmabuf_id
-		 * operands4 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
+		 * op0~3 : hyper_dmabuf_id
+		 * op4 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
 		 */
 		for (i = 0; i < 5; i++)
-			req->operands[i] = operands[i];
+			req->op[i] = op[i];
 		break;
 
 	default:
@@ -116,9 +113,9 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 	}
 }
 
-void cmd_process_work(struct work_struct *work)
+static void cmd_process_work(struct work_struct *work)
 {
-	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	struct imported_sgt_info *imported;
 	struct cmd_process *proc = container_of(work, struct cmd_process, work);
 	struct hyper_dmabuf_req *req;
 	int domid;
@@ -127,107 +124,107 @@ void cmd_process_work(struct work_struct *work)
 	req = proc->rq;
 	domid = proc->domid;
 
-	switch (req->command) {
+	switch (req->cmd) {
 	case HYPER_DMABUF_EXPORT:
 		/* exporting pages for dmabuf */
 		/* command : HYPER_DMABUF_EXPORT,
-		 * operands0~3 : hyper_dmabuf_id
-		 * operands4 : number of pages to be shared
-		 * operands5 : offset of data in the first page
-		 * operands6 : length of data in the last page
-		 * operands7 : top-level reference number for shared pages
-		 * operands8 : size of private data (from operands9)
-		 * operands9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * op0~3 : hyper_dmabuf_id
+		 * op4 : number of pages to be shared
+		 * op5 : offset of data in the first page
+		 * op6 : length of data in the last page
+		 * op7 : top-level reference number for shared pages
+		 * op8 : size of private data (from op9)
+		 * op9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
 
 		/* if nents == 0, it means it is a message only for priv synchronization
 		 * for existing imported_sgt_info so not creating a new one */
-		if (req->operands[4] == 0) {
-			hyper_dmabuf_id_t exist = {req->operands[0],
-						   {req->operands[1], req->operands[2],
-						    req->operands[3]}};
+		if (req->op[4] == 0) {
+			hyper_dmabuf_id_t exist = {req->op[0],
+						   {req->op[1], req->op[2],
+						   req->op[3]}};
 
-			imported_sgt_info = hyper_dmabuf_find_imported(exist);
+			imported = hyper_dmabuf_find_imported(exist);
 
-			if (!imported_sgt_info) {
-				dev_err(hyper_dmabuf_private.device,
+			if (!imported) {
+				dev_err(hy_drv_priv->dev,
 					"Can't find imported sgt_info from IMPORT_LIST\n");
 				break;
 			}
 
 			/* if size of new private data is different,
 			 * we reallocate it. */
-			if (imported_sgt_info->sz_priv != req->operands[8]) {
-				kfree(imported_sgt_info->priv);
-				imported_sgt_info->sz_priv = req->operands[8];
-				imported_sgt_info->priv = kcalloc(1, req->operands[8], GFP_KERNEL);
-				if (!imported_sgt_info->priv) {
-					dev_err(hyper_dmabuf_private.device,
+			if (imported->sz_priv != req->op[8]) {
+				kfree(imported->priv);
+				imported->sz_priv = req->op[8];
+				imported->priv = kcalloc(1, req->op[8], GFP_KERNEL);
+				if (!imported->priv) {
+					dev_err(hy_drv_priv->dev,
 						"Fail to allocate priv\n");
 
 					/* set it invalid */
-					imported_sgt_info->valid = 0;
+					imported->valid = 0;
 					break;
 				}
 			}
 
 			/* updating priv data */
-			memcpy(imported_sgt_info->priv, &req->operands[9], req->operands[8]);
+			memcpy(imported->priv, &req->op[9], req->op[8]);
 
 #ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 			/* generating import event */
-			hyper_dmabuf_import_event(imported_sgt_info->hid);
+			hyper_dmabuf_import_event(imported->hid);
 #endif
 
 			break;
 		}
 
-		imported_sgt_info = kcalloc(1, sizeof(*imported_sgt_info), GFP_KERNEL);
+		imported = kcalloc(1, sizeof(*imported), GFP_KERNEL);
 
-		if (!imported_sgt_info) {
-			dev_err(hyper_dmabuf_private.device,
+		if (!imported) {
+			dev_err(hy_drv_priv->dev,
 				"No memory left to be allocated\n");
 			break;
 		}
 
-		imported_sgt_info->sz_priv = req->operands[8];
-		imported_sgt_info->priv = kcalloc(1, req->operands[8], GFP_KERNEL);
+		imported->sz_priv = req->op[8];
+		imported->priv = kcalloc(1, req->op[8], GFP_KERNEL);
 
-		if (!imported_sgt_info->priv) {
-			dev_err(hyper_dmabuf_private.device,
+		if (!imported->priv) {
+			dev_err(hy_drv_priv->dev,
 				"Fail to allocate priv\n");
 
-			kfree(imported_sgt_info);
+			kfree(imported);
 			break;
 		}
 
-		imported_sgt_info->hid.id = req->operands[0];
+		imported->hid.id = req->op[0];
 
 		for (i=0; i<3; i++)
-			imported_sgt_info->hid.rng_key[i] = req->operands[i+1];
+			imported->hid.rng_key[i] = req->op[i+1];
 
-		imported_sgt_info->nents = req->operands[4];
-		imported_sgt_info->frst_ofst = req->operands[5];
-		imported_sgt_info->last_len = req->operands[6];
-		imported_sgt_info->ref_handle = req->operands[7];
+		imported->nents = req->op[4];
+		imported->frst_ofst = req->op[5];
+		imported->last_len = req->op[6];
+		imported->ref_handle = req->op[7];
 
-		dev_dbg(hyper_dmabuf_private.device, "DMABUF was exported\n");
-		dev_dbg(hyper_dmabuf_private.device, "\thid{id:%d key:%d %d %d}\n",
-			req->operands[0], req->operands[1], req->operands[2],
-			req->operands[3]);
-		dev_dbg(hyper_dmabuf_private.device, "\tnents %d\n", req->operands[4]);
-		dev_dbg(hyper_dmabuf_private.device, "\tfirst offset %d\n", req->operands[5]);
-		dev_dbg(hyper_dmabuf_private.device, "\tlast len %d\n", req->operands[6]);
-		dev_dbg(hyper_dmabuf_private.device, "\tgrefid %d\n", req->operands[7]);
+		dev_dbg(hy_drv_priv->dev, "DMABUF was exported\n");
+		dev_dbg(hy_drv_priv->dev, "\thid{id:%d key:%d %d %d}\n",
+			req->op[0], req->op[1], req->op[2],
+			req->op[3]);
+		dev_dbg(hy_drv_priv->dev, "\tnents %d\n", req->op[4]);
+		dev_dbg(hy_drv_priv->dev, "\tfirst offset %d\n", req->op[5]);
+		dev_dbg(hy_drv_priv->dev, "\tlast len %d\n", req->op[6]);
+		dev_dbg(hy_drv_priv->dev, "\tgrefid %d\n", req->op[7]);
 
-		memcpy(imported_sgt_info->priv, &req->operands[9], req->operands[8]);
+		memcpy(imported->priv, &req->op[9], req->op[8]);
 
-		imported_sgt_info->valid = 1;
-		hyper_dmabuf_register_imported(imported_sgt_info);
+		imported->valid = true;
+		hyper_dmabuf_register_imported(imported);
 
 #ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 		/* generating import event */
-		hyper_dmabuf_import_event(imported_sgt_info->hid);
+		hyper_dmabuf_import_event(imported->hid);
 #endif
 
 		break;
@@ -251,142 +248,142 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 {
 	struct cmd_process *proc;
 	struct hyper_dmabuf_req *temp_req;
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
-	struct hyper_dmabuf_sgt_info *exp_sgt_info;
+	struct imported_sgt_info *imported;
+	struct exported_sgt_info *exported;
 	hyper_dmabuf_id_t hid;
 	int ret;
 
 	if (!req) {
-		dev_err(hyper_dmabuf_private.device, "request is NULL\n");
+		dev_err(hy_drv_priv->dev, "request is NULL\n");
 		return -EINVAL;
 	}
 
-	hid.id = req->operands[0];
-	hid.rng_key[0] = req->operands[1];
-	hid.rng_key[1] = req->operands[2];
-	hid.rng_key[2] = req->operands[3];
+	hid.id = req->op[0];
+	hid.rng_key[0] = req->op[1];
+	hid.rng_key[1] = req->op[2];
+	hid.rng_key[2] = req->op[3];
 
-	if ((req->command < HYPER_DMABUF_EXPORT) ||
-		(req->command > HYPER_DMABUF_OPS_TO_SOURCE)) {
-		dev_err(hyper_dmabuf_private.device, "invalid command\n");
+	if ((req->cmd < HYPER_DMABUF_EXPORT) ||
+		(req->cmd > HYPER_DMABUF_OPS_TO_SOURCE)) {
+		dev_err(hy_drv_priv->dev, "invalid command\n");
 		return -EINVAL;
 	}
 
-	req->status = HYPER_DMABUF_REQ_PROCESSED;
+	req->stat = HYPER_DMABUF_REQ_PROCESSED;
 
 	/* HYPER_DMABUF_DESTROY requires immediate
 	 * follow up so can't be processed in workqueue
 	 */
-	if (req->command == HYPER_DMABUF_NOTIFY_UNEXPORT) {
+	if (req->cmd == HYPER_DMABUF_NOTIFY_UNEXPORT) {
 		/* destroy sg_list for hyper_dmabuf_id on remote side */
 		/* command : HYPER_DMABUF_NOTIFY_UNEXPORT,
-		 * operands0~3 : hyper_dmabuf_id
+		 * op0~3 : hyper_dmabuf_id
 		 */
-		dev_dbg(hyper_dmabuf_private.device,
+		dev_dbg(hy_drv_priv->dev,
 			"%s: processing HYPER_DMABUF_NOTIFY_UNEXPORT\n", __func__);
 
-		sgt_info = hyper_dmabuf_find_imported(hid);
+		imported = hyper_dmabuf_find_imported(hid);
 
-		if (sgt_info) {
+		if (imported) {
 			/* if anything is still using dma_buf */
-			if (sgt_info->num_importers) {
+			if (imported->importers) {
 				/*
 				 * Buffer is still in  use, just mark that it should
 				 * not be allowed to export its fd anymore.
 				 */
-				sgt_info->valid = 0;
+				imported->valid = false;
 			} else {
 				/* No one is using buffer, remove it from imported list */
 				hyper_dmabuf_remove_imported(hid);
-				kfree(sgt_info);
+				kfree(imported);
 			}
 		} else {
-			req->status = HYPER_DMABUF_REQ_ERROR;
+			req->stat = HYPER_DMABUF_REQ_ERROR;
 		}
 
-		return req->command;
+		return req->cmd;
 	}
 
 	/* dma buf remote synchronization */
-	if (req->command == HYPER_DMABUF_OPS_TO_SOURCE) {
+	if (req->cmd == HYPER_DMABUF_OPS_TO_SOURCE) {
 		/* notifying dmabuf map/unmap to exporter, map will make the driver to do shadow mapping
 		 * or unmapping for synchronization with original exporter (e.g. i915) */
 
 		/* command : DMABUF_OPS_TO_SOURCE.
-		 * operands0~3 : hyper_dmabuf_id
-		 * operands1 : enum hyper_dmabuf_ops {....}
+		 * op0~3 : hyper_dmabuf_id
+		 * op1 : enum hyper_dmabuf_ops {....}
 		 */
-		dev_dbg(hyper_dmabuf_private.device,
+		dev_dbg(hy_drv_priv->dev,
 			"%s: HYPER_DMABUF_OPS_TO_SOURCE\n", __func__);
 
-		ret = hyper_dmabuf_remote_sync(hid, req->operands[4]);
+		ret = hyper_dmabuf_remote_sync(hid, req->op[4]);
 
 		if (ret)
-			req->status = HYPER_DMABUF_REQ_ERROR;
+			req->stat = HYPER_DMABUF_REQ_ERROR;
 		else
-			req->status = HYPER_DMABUF_REQ_PROCESSED;
+			req->stat = HYPER_DMABUF_REQ_PROCESSED;
 
-		return req->command;
+		return req->cmd;
 	}
 
 	/* synchronous dma_buf_fd export */
-	if (req->command == HYPER_DMABUF_EXPORT_FD) {
+	if (req->cmd == HYPER_DMABUF_EXPORT_FD) {
 		/* find a corresponding SGT for the id */
-		dev_dbg(hyper_dmabuf_private.device,
+		dev_dbg(hy_drv_priv->dev,
 			"Processing HYPER_DMABUF_EXPORT_FD for buffer {id:%d key:%d %d %d}\n",
 			hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
-		exp_sgt_info = hyper_dmabuf_find_exported(hid);
+		exported = hyper_dmabuf_find_exported(hid);
 
-		if (!exp_sgt_info) {
-			dev_err(hyper_dmabuf_private.device,
+		if (!exported) {
+			dev_err(hy_drv_priv->dev,
 				"critical err: requested sgt_info can't be found for buffer {id:%d key:%d %d %d}\n",
 				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
-			req->status = HYPER_DMABUF_REQ_ERROR;
-		} else if (!exp_sgt_info->valid) {
-			dev_dbg(hyper_dmabuf_private.device,
+			req->stat = HYPER_DMABUF_REQ_ERROR;
+		} else if (!exported->valid) {
+			dev_dbg(hy_drv_priv->dev,
 				"Buffer no longer valid - cannot export fd for buffer {id:%d key:%d %d %d}\n",
 				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
-			req->status = HYPER_DMABUF_REQ_ERROR;
+			req->stat = HYPER_DMABUF_REQ_ERROR;
 		} else {
-			dev_dbg(hyper_dmabuf_private.device,
+			dev_dbg(hy_drv_priv->dev,
 				"Buffer still valid - can export fd for buffer {id:%d key:%d %d %d}\n",
 				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
-			exp_sgt_info->importer_exported++;
-			req->status = HYPER_DMABUF_REQ_PROCESSED;
+			exported->active++;
+			req->stat = HYPER_DMABUF_REQ_PROCESSED;
 		}
-		return req->command;
+		return req->cmd;
 	}
 
-	if (req->command == HYPER_DMABUF_EXPORT_FD_FAILED) {
-		dev_dbg(hyper_dmabuf_private.device,
+	if (req->cmd == HYPER_DMABUF_EXPORT_FD_FAILED) {
+		dev_dbg(hy_drv_priv->dev,
 			"Processing HYPER_DMABUF_EXPORT_FD_FAILED for buffer {id:%d key:%d %d %d}\n",
 			hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
-		exp_sgt_info = hyper_dmabuf_find_exported(hid);
+		exported = hyper_dmabuf_find_exported(hid);
 
-		if (!exp_sgt_info) {
-			dev_err(hyper_dmabuf_private.device,
+		if (!exported) {
+			dev_err(hy_drv_priv->dev,
 				"critical err: requested sgt_info can't be found for buffer {id:%d key:%d %d %d}\n",
 				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
-			req->status = HYPER_DMABUF_REQ_ERROR;
+			req->stat = HYPER_DMABUF_REQ_ERROR;
 		} else {
-			exp_sgt_info->importer_exported--;
-			req->status = HYPER_DMABUF_REQ_PROCESSED;
+			exported->active--;
+			req->stat = HYPER_DMABUF_REQ_PROCESSED;
 		}
-		return req->command;
+		return req->cmd;
 	}
 
-	dev_dbg(hyper_dmabuf_private.device,
+	dev_dbg(hy_drv_priv->dev,
 		"%s: putting request to workqueue\n", __func__);
 	temp_req = kmalloc(sizeof(*temp_req), GFP_KERNEL);
 
 	if (!temp_req) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"No memory left to be allocated\n");
 		return -ENOMEM;
 	}
@@ -396,7 +393,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	proc = kcalloc(1, sizeof(struct cmd_process), GFP_KERNEL);
 
 	if (!proc) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"No memory left to be allocated\n");
 		kfree(temp_req);
 		return -ENOMEM;
@@ -407,7 +404,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 
 	INIT_WORK(&(proc->work), cmd_process_work);
 
-	queue_work(hyper_dmabuf_private.work_queue, &(proc->work));
+	queue_work(hy_drv_priv->work_queue, &(proc->work));
 
-	return req->command;
+	return req->cmd;
 }

@@ -32,16 +32,12 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/dma-buf.h>
-#include <xen/grant_table.h>
-#include <asm/xen/page.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_sgl_proc.h"
 #include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
-
-extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 #define REFS_PER_PAGE (PAGE_SIZE/sizeof(grant_ref_t))
 
@@ -66,60 +62,68 @@ static int hyper_dmabuf_get_num_pgs(struct sg_table *sgt)
 	sgl = sgt->sgl;
 
 	length = sgl->length - PAGE_SIZE + sgl->offset;
-	num_pages += ((length + PAGE_SIZE - 1)/PAGE_SIZE); /* round-up */
+
+	/* round-up */
+	num_pages += ((length + PAGE_SIZE - 1)/PAGE_SIZE);
 
 	for (i = 1; i < sgt->nents; i++) {
 		sgl = sg_next(sgl);
-		num_pages += ((sgl->length + PAGE_SIZE - 1) / PAGE_SIZE); /* round-up */
+
+		/* round-up */
+		num_pages += ((sgl->length + PAGE_SIZE - 1) /
+			     PAGE_SIZE); /* round-up */
 	}
 
 	return num_pages;
 }
 
 /* extract pages directly from struct sg_table */
-struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
+struct pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 {
-	struct hyper_dmabuf_pages_info *pinfo;
+	struct pages_info *pg_info;
 	int i, j, k;
 	int length;
 	struct scatterlist *sgl;
 
-	pinfo = kmalloc(sizeof(*pinfo), GFP_KERNEL);
-	if (!pinfo)
+	pg_info = kmalloc(sizeof(*pg_info), GFP_KERNEL);
+	if (!pg_info)
 		return NULL;
 
-	pinfo->pages = kmalloc(sizeof(struct page *)*hyper_dmabuf_get_num_pgs(sgt), GFP_KERNEL);
-	if (!pinfo->pages) {
-		kfree(pinfo);
+	pg_info->pgs = kmalloc(sizeof(struct page *) *
+			       hyper_dmabuf_get_num_pgs(sgt),
+			       GFP_KERNEL);
+
+	if (!pg_info->pgs) {
+		kfree(pg_info);
 		return NULL;
 	}
 
 	sgl = sgt->sgl;
 
-	pinfo->nents = 1;
-	pinfo->frst_ofst = sgl->offset;
-	pinfo->pages[0] = sg_page(sgl);
+	pg_info->nents = 1;
+	pg_info->frst_ofst = sgl->offset;
+	pg_info->pgs[0] = sg_page(sgl);
 	length = sgl->length - PAGE_SIZE + sgl->offset;
 	i = 1;
 
 	while (length > 0) {
-		pinfo->pages[i] = nth_page(sg_page(sgl), i);
+		pg_info->pgs[i] = nth_page(sg_page(sgl), i);
 		length -= PAGE_SIZE;
-		pinfo->nents++;
+		pg_info->nents++;
 		i++;
 	}
 
 	for (j = 1; j < sgt->nents; j++) {
 		sgl = sg_next(sgl);
-		pinfo->pages[i++] = sg_page(sgl);
+		pg_info->pgs[i++] = sg_page(sgl);
 		length = sgl->length - PAGE_SIZE;
-		pinfo->nents++;
+		pg_info->nents++;
 		k = 1;
 
 		while (length > 0) {
-			pinfo->pages[i++] = nth_page(sg_page(sgl), k++);
+			pg_info->pgs[i++] = nth_page(sg_page(sgl), k++);
 			length -= PAGE_SIZE;
-			pinfo->nents++;
+			pg_info->nents++;
 		}
 	}
 
@@ -127,13 +131,13 @@ struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 	 * lenght at that point will be 0 or negative,
 	 * so to calculate last page size just add it to PAGE_SIZE
 	 */
-	pinfo->last_len = PAGE_SIZE + length;
+	pg_info->last_len = PAGE_SIZE + length;
 
-	return pinfo;
+	return pg_info;
 }
 
 /* create sg_table with given pages and other parameters */
-struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
+struct sg_table* hyper_dmabuf_create_sgt(struct page **pgs,
 					 int frst_ofst, int last_len, int nents)
 {
 	struct sg_table *sgt;
@@ -157,31 +161,32 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 
 	sgl = sgt->sgl;
 
-	sg_set_page(sgl, pages[0], PAGE_SIZE-frst_ofst, frst_ofst);
+	sg_set_page(sgl, pgs[0], PAGE_SIZE-frst_ofst, frst_ofst);
 
 	for (i=1; i<nents-1; i++) {
 		sgl = sg_next(sgl);
-		sg_set_page(sgl, pages[i], PAGE_SIZE, 0);
+		sg_set_page(sgl, pgs[i], PAGE_SIZE, 0);
 	}
 
 	if (nents > 1) /* more than one page */ {
 		sgl = sg_next(sgl);
-		sg_set_page(sgl, pages[i], last_len, 0);
+		sg_set_page(sgl, pgs[i], last_len, 0);
 	}
 
 	return sgt;
 }
 
-int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int force)
+int hyper_dmabuf_cleanup_sgt_info(struct exported_sgt_info *exported,
+				  int force)
 {
 	struct sgt_list *sgtl;
 	struct attachment_list *attachl;
 	struct kmap_vaddr_list *va_kmapl;
 	struct vmap_vaddr_list *va_vmapl;
-	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
+	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
 
-	if (!sgt_info) {
-		dev_err(hyper_dmabuf_private.device, "invalid hyper_dmabuf_id\n");
+	if (!exported) {
+		dev_err(hy_drv_priv->dev, "invalid hyper_dmabuf_id\n");
 		return -EINVAL;
 	}
 
@@ -190,35 +195,37 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	 * side.
 	 */
 	if (!force &&
-	    sgt_info->importer_exported) {
-		dev_warn(hyper_dmabuf_private.device, "dma-buf is used by importer\n");
+	    exported->active) {
+		dev_warn(hy_drv_priv->dev,
+			 "dma-buf is used by importer\n");
+
 		return -EPERM;
 	}
 
 	/* force == 1 is not recommended */
-	while (!list_empty(&sgt_info->va_kmapped->list)) {
-		va_kmapl = list_first_entry(&sgt_info->va_kmapped->list,
+	while (!list_empty(&exported->va_kmapped->list)) {
+		va_kmapl = list_first_entry(&exported->va_kmapped->list,
 					    struct kmap_vaddr_list, list);
 
-		dma_buf_kunmap(sgt_info->dma_buf, 1, va_kmapl->vaddr);
+		dma_buf_kunmap(exported->dma_buf, 1, va_kmapl->vaddr);
 		list_del(&va_kmapl->list);
 		kfree(va_kmapl);
 	}
 
-	while (!list_empty(&sgt_info->va_vmapped->list)) {
-		va_vmapl = list_first_entry(&sgt_info->va_vmapped->list,
+	while (!list_empty(&exported->va_vmapped->list)) {
+		va_vmapl = list_first_entry(&exported->va_vmapped->list,
 					    struct vmap_vaddr_list, list);
 
-		dma_buf_vunmap(sgt_info->dma_buf, va_vmapl->vaddr);
+		dma_buf_vunmap(exported->dma_buf, va_vmapl->vaddr);
 		list_del(&va_vmapl->list);
 		kfree(va_vmapl);
 	}
 
-	while (!list_empty(&sgt_info->active_sgts->list)) {
-		attachl = list_first_entry(&sgt_info->active_attached->list,
+	while (!list_empty(&exported->active_sgts->list)) {
+		attachl = list_first_entry(&exported->active_attached->list,
 					   struct attachment_list, list);
 
-		sgtl = list_first_entry(&sgt_info->active_sgts->list,
+		sgtl = list_first_entry(&exported->active_sgts->list,
 					struct sgt_list, list);
 
 		dma_buf_unmap_attachment(attachl->attach, sgtl->sgt,
@@ -227,35 +234,35 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 		kfree(sgtl);
 	}
 
-	while (!list_empty(&sgt_info->active_sgts->list)) {
-		attachl = list_first_entry(&sgt_info->active_attached->list,
+	while (!list_empty(&exported->active_sgts->list)) {
+		attachl = list_first_entry(&exported->active_attached->list,
 					   struct attachment_list, list);
 
-		dma_buf_detach(sgt_info->dma_buf, attachl->attach);
+		dma_buf_detach(exported->dma_buf, attachl->attach);
 		list_del(&attachl->list);
 		kfree(attachl);
 	}
 
 	/* Start cleanup of buffer in reverse order to exporting */
-	ops->unshare_pages(&sgt_info->refs_info, sgt_info->nents);
+	ops->unshare_pages(&exported->refs_info, exported->nents);
 
 	/* unmap dma-buf */
-	dma_buf_unmap_attachment(sgt_info->active_attached->attach,
-				 sgt_info->active_sgts->sgt,
+	dma_buf_unmap_attachment(exported->active_attached->attach,
+				 exported->active_sgts->sgt,
 				 DMA_BIDIRECTIONAL);
 
 	/* detatch dma-buf */
-	dma_buf_detach(sgt_info->dma_buf, sgt_info->active_attached->attach);
+	dma_buf_detach(exported->dma_buf, exported->active_attached->attach);
 
 	/* close connection to dma-buf completely */
-	dma_buf_put(sgt_info->dma_buf);
-	sgt_info->dma_buf = NULL;
+	dma_buf_put(exported->dma_buf);
+	exported->dma_buf = NULL;
 
-	kfree(sgt_info->active_sgts);
-	kfree(sgt_info->active_attached);
-	kfree(sgt_info->va_kmapped);
-	kfree(sgt_info->va_vmapped);
-	kfree(sgt_info->priv);
+	kfree(exported->active_sgts);
+	kfree(exported->active_attached);
+	kfree(exported->va_kmapped);
+	kfree(exported->va_vmapped);
+	kfree(exported->priv);
 
 	return 0;
 }

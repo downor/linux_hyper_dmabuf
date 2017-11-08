@@ -28,13 +28,15 @@
 int dmabuf_refcount(struct dma_buf *dma_buf);
 
 /* extract pages directly from struct sg_table */
-struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt);
+struct pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt);
 
 /* create sg_table with given pages and other parameters */
-struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
-                                int frst_ofst, int last_len, int nents);
+struct sg_table* hyper_dmabuf_create_sgt(struct page **pgs,
+					 int frst_ofst, int last_len,
+					 int nents);
 
-int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int force);
+int hyper_dmabuf_cleanup_sgt_info(struct exported_sgt_info *exported,
+				  int force);
 
 void hyper_dmabuf_free_sgt(struct sg_table *sgt);
 

@@ -32,13 +32,13 @@
 /* number of bits to be used for imported dmabufs hash table */
 #define MAX_ENTRY_IMPORTED 7
 
-struct hyper_dmabuf_info_entry_exported {
-        struct hyper_dmabuf_sgt_info *info;
+struct list_entry_exported {
+        struct exported_sgt_info *exported;
         struct hlist_node node;
 };
 
-struct hyper_dmabuf_info_entry_imported {
-        struct hyper_dmabuf_imported_sgt_info *info;
+struct list_entry_imported {
+        struct imported_sgt_info *imported;
         struct hlist_node node;
 };
 
@@ -46,23 +46,23 @@ int hyper_dmabuf_table_init(void);
 
 int hyper_dmabuf_table_destroy(void);
 
-int hyper_dmabuf_register_exported(struct hyper_dmabuf_sgt_info *info);
+int hyper_dmabuf_register_exported(struct exported_sgt_info *info);
 
 /* search for pre-exported sgt and return id of it if it exist */
 hyper_dmabuf_id_t hyper_dmabuf_find_hid_exported(struct dma_buf *dmabuf, int domid);
 
-int hyper_dmabuf_register_imported(struct hyper_dmabuf_imported_sgt_info* info);
+int hyper_dmabuf_register_imported(struct imported_sgt_info* info);
 
-struct hyper_dmabuf_sgt_info *hyper_dmabuf_find_exported(hyper_dmabuf_id_t hid);
+struct exported_sgt_info *hyper_dmabuf_find_exported(hyper_dmabuf_id_t hid);
 
-struct hyper_dmabuf_imported_sgt_info *hyper_dmabuf_find_imported(hyper_dmabuf_id_t hid);
+struct imported_sgt_info *hyper_dmabuf_find_imported(hyper_dmabuf_id_t hid);
 
 int hyper_dmabuf_remove_exported(hyper_dmabuf_id_t hid);
 
 int hyper_dmabuf_remove_imported(hyper_dmabuf_id_t hid);
 
 void hyper_dmabuf_foreach_exported(
-	void (*func)(struct hyper_dmabuf_sgt_info *, void *attr),
+	void (*func)(struct exported_sgt_info *, void *attr),
 	void *attr);
 
 int hyper_dmabuf_register_sysfs(struct device *dev);

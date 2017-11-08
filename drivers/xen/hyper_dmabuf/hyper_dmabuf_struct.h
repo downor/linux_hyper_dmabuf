@@ -50,24 +50,20 @@ struct vmap_vaddr_list {
 };
 
 /* Exporter builds pages_info before sharing pages */
-struct hyper_dmabuf_pages_info {
+struct pages_info {
         int frst_ofst; /* offset of data in the first page */
         int last_len; /* length of data in the last page */
         int nents; /* # of pages */
-        struct page **pages; /* pages that contains reference numbers of shared pages*/
+        struct page **pgs; /* pages that contains reference numbers of shared pages*/
 };
 
 
-/* Both importer and exporter use this structure to point to sg lists
- *
- * Exporter stores references to sgt in a hash table
+/* Exporter stores references to sgt in a hash table
  * Exporter keeps these references for synchronization and tracking purposes
- *
- * Importer use this structure exporting to other drivers in the same domain
  */
-struct hyper_dmabuf_sgt_info {
+struct exported_sgt_info {
         hyper_dmabuf_id_t hid; /* unique id to reference dmabuf in remote domain */
-	int hyper_dmabuf_rdomain; /* domain importing this sgt */
+	int rdomid; /* domain importing this sgt */
 
 	struct dma_buf *dma_buf; /* needed to store this for freeing it later */
 	int nents;
@@ -79,10 +75,10 @@ struct hyper_dmabuf_sgt_info {
 	struct vmap_vaddr_list *va_vmapped;
 
 	bool valid; /* set to 0 once unexported. Needed to prevent further mapping by importer */
-	int importer_exported; /* exported locally on importer's side */
+	int active; /* locally shared on importer's side */
 	void *refs_info; /* hypervisor-specific info for the references */
-	struct delayed_work unexport_work;
-	bool unexport_scheduled;
+	struct delayed_work unexport;
+	bool unexport_sched;
 
 	/* owner of buffer
 	 * TODO: that is naiive as buffer may be reused by
@@ -99,7 +95,7 @@ struct hyper_dmabuf_sgt_info {
 /* Importer store references (before mapping) on shared pages
  * Importer store these references in the table and map it in
  * its own memory map once userspace asks for reference for the buffer */
-struct hyper_dmabuf_imported_sgt_info {
+struct imported_sgt_info {
 	hyper_dmabuf_id_t hid; /* unique id for shared dmabuf imported */
 
 	int ref_handle; /* reference number of top level addressing page of shared pages */
@@ -112,7 +108,7 @@ struct hyper_dmabuf_imported_sgt_info {
 
 	void *refs_info;
 	bool valid;
-	int num_importers;
+	int importers;
 
 	size_t sz_priv;
 	char *priv; /* device specific info (e.g. image's meta info?) */
