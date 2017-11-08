@@ -282,6 +282,7 @@ reexport:
 
 	/* free msg */
 	kfree(req);
+
 	/* free page_info */
 	kfree(page_info->pages);
 	kfree(page_info);
@@ -297,6 +298,10 @@ fail_send_request:
 
 fail_map_req:
 	hyper_dmabuf_remove_exported(sgt_info->hid);
+
+	/* free page_info */
+	kfree(page_info->pages);
+	kfree(page_info);
 
 fail_export:
 	kfree(sgt_info->va_vmapped);
@@ -433,6 +438,13 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 
 			sgt_info->num_importers--;
 			req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+
+			if (!req) {
+				dev_err(hyper_dmabuf_private.device,
+					"No more space left\n");
+				return -ENOMEM;
+			}
+
 			hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD_FAILED, &operands[0]);
 			ops->send_req(HYPER_DMABUF_DOM_ID(sgt_info->hid), req, false);
 			kfree(req);
@@ -681,16 +693,19 @@ long hyper_dmabuf_ioctl(struct file *filp,
 
 	if (copy_from_user(kdata, (void __user *)param, _IOC_SIZE(cmd)) != 0) {
 		dev_err(hyper_dmabuf_private.device, "failed to copy from user arguments\n");
-		return -EFAULT;
+		ret = -EFAULT;
+		goto ioctl_error;
 	}
 
 	ret = func(filp, kdata);
 
 	if (copy_to_user((void __user *)param, kdata, _IOC_SIZE(cmd)) != 0) {
 		dev_err(hyper_dmabuf_private.device, "failed to copy to user arguments\n");
-		return -EFAULT;
+		ret = -EFAULT;
+		goto ioctl_error;
 	}
 
+ioctl_error:
 	kfree(kdata);
 
 	return ret;

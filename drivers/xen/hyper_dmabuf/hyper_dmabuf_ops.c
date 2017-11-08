@@ -148,9 +148,8 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	if (!st)
 		goto err_free_sg;
 
-        if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir)) {
+        if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir))
                 goto err_free_sg;
-        }
 
 	ret = hyper_dmabuf_sync_request(sgt_info->hid,
 					HYPER_DMABUF_OPS_MAP);
@@ -170,6 +169,9 @@ err_free_sg:
 		sg_free_table(st);
 		kfree(st);
 	}
+
+	kfree(page_info->pages);
+	kfree(page_info);
 
 	return NULL;
 }

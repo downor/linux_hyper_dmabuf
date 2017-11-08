@@ -191,14 +191,18 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	struct hyper_dmabuf_req *temp_req;
 	struct hyper_dmabuf_imported_sgt_info *sgt_info;
 	struct hyper_dmabuf_sgt_info *exp_sgt_info;
-	hyper_dmabuf_id_t hid = {req->operands[0], /* hid.id */
-			       {req->operands[1], req->operands[2], req->operands[3]}}; /* hid.rng_key */
+	hyper_dmabuf_id_t hid;
 	int ret;
 
 	if (!req) {
 		dev_err(hyper_dmabuf_private.device, "request is NULL\n");
 		return -EINVAL;
 	}
+
+	hid.id = req->operands[0];
+	hid.rng_key[0] = req->operands[1];
+	hid.rng_key[1] = req->operands[2];
+	hid.rng_key[2] = req->operands[3];
 
 	if ((req->command < HYPER_DMABUF_EXPORT) ||
 		(req->command > HYPER_DMABUF_OPS_TO_SOURCE)) {
@@ -332,6 +336,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	if (!proc) {
 		dev_err(hyper_dmabuf_private.device,
 			"No memory left to be allocated\n");
+		kfree(temp_req);
 		return -ENOMEM;
 	}
 
