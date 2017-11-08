@@ -104,24 +104,24 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 
 	*refs_info = (void *)sh_pages_info;
 
-	/* share data pages in rw mode*/
+	/* share data pages in readonly mode for security */
 	for (i=0; i<nents; i++) {
 		lvl2_table[i] = gnttab_grant_foreign_access(domid,
 							    pfn_to_mfn(page_to_pfn(pages[i])),
-							    0);
+							    true /* read-only from remote domain */);
 	}
 
 	/* Share 2nd level addressing pages in readonly mode*/
 	for (i=0; i< n_lvl2_grefs; i++) {
 		lvl3_table[i] = gnttab_grant_foreign_access(domid,
 							    virt_to_mfn((unsigned long)lvl2_table+i*PAGE_SIZE ),
-							    1);
+							    true);
 	}
 
 	/* Share lvl3_table in readonly mode*/
 	lvl3_gref = gnttab_grant_foreign_access(domid,
 						virt_to_mfn((unsigned long)lvl3_table),
-						1);
+						true);
 
 
 	/* Store lvl3_table page to be freed later */
@@ -317,12 +317,12 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 		for (j = 0; j < REFS_PER_PAGE; j++) {
 			gnttab_set_map_op(&data_map_ops[k],
 					  (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-					  GNTMAP_host_map,
+					  GNTMAP_host_map | GNTMAP_readonly,
 					  lvl2_table[j], domid);
 
 			gnttab_set_unmap_op(&data_unmap_ops[k],
 					    (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-					    GNTMAP_host_map, -1);
+					    GNTMAP_host_map | GNTMAP_readonly, -1);
 			k++;
 		}
 	}
@@ -333,12 +333,12 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 	for (j = 0; j < nents_last; j++) {
 		gnttab_set_map_op(&data_map_ops[k],
 				  (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-				  GNTMAP_host_map,
+				  GNTMAP_host_map | GNTMAP_readonly,
 				  lvl2_table[j], domid);
 
 		gnttab_set_unmap_op(&data_unmap_ops[k],
 				    (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-				    GNTMAP_host_map, -1);
+				    GNTMAP_host_map | GNTMAP_readonly, -1);
 		k++;
 	}
 
