@@ -168,8 +168,11 @@ put_back_event:
 				ret -= sizeof(struct hyper_dmabuf_event_hdr);
 
 				/* nullifying hdr of the event in user buffer */
-				copy_to_user(buffer + ret, &dummy_hdr,
-					     sizeof(dummy_hdr));
+				if (copy_to_user(buffer + ret, &dummy_hdr,
+						 sizeof(dummy_hdr))) {
+					dev_err(hyper_dmabuf_private.device,
+						"failed to nullify invalid hdr already in userspace\n");
+				}
 
 				ret = -EFAULT;
 

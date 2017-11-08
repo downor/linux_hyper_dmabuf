@@ -109,7 +109,7 @@ struct ioctl_hyper_dmabuf_query {
 	int item;
 	/* OUT parameters */
 	/* Value of queried item */
-	int info;
+	unsigned long info;
 };
 
 /* DMABUF query */
@@ -122,6 +122,8 @@ enum hyper_dmabuf_query {
         HYPER_DMABUF_QUERY_BUSY,
         HYPER_DMABUF_QUERY_UNEXPORTED,
         HYPER_DMABUF_QUERY_DELAYED_UNEXPORTED,
+        HYPER_DMABUF_QUERY_PRIV_INFO_SIZE,
+        HYPER_DMABUF_QUERY_PRIV_INFO,
 };
 
 enum hyper_dmabuf_status {
