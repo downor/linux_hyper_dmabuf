@@ -31,10 +31,10 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/dma-buf.h>
+#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_msg.h"
-#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_imp.h"
@@ -56,7 +56,7 @@ extern struct hyper_dmabuf_private hyper_dmabuf_private;
  * is what is created when initial exporting is issued so it
  * should not be modified or released by this fuction.
  */
-int hyper_dmabuf_remote_sync(int id, int ops)
+int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 {
 	struct hyper_dmabuf_sgt_info *sgt_info;
 	struct sgt_list *sgtl;
@@ -66,7 +66,7 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	int ret;
 
 	/* find a coresponding SGT for the id */
-	sgt_info = hyper_dmabuf_find_exported(id);
+	sgt_info = hyper_dmabuf_find_exported(hid);
 
 	if (!sgt_info) {
 		dev_err(hyper_dmabuf_private.device,
@@ -167,9 +167,10 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 
 	case HYPER_DMABUF_OPS_RELEASE:
 		dev_dbg(hyper_dmabuf_private.device,
-			"Buffer %d released, references left: %d\n",
-			 sgt_info->hyper_dmabuf_id,
-			 sgt_info->importer_exported -1);
+			"Buffer {id:%d key:%d %d %d} released, references left: %d\n",
+			 sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+			 sgt_info->hid.rng_key[2], sgt_info->importer_exported -1);
+
                 sgt_info->importer_exported--;
 		/* If there are still importers just break, if no then continue with final cleanup */
 		if (sgt_info->importer_exported)
@@ -180,15 +181,17 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 		 * If not and buffer was unexported, clean up shared data and remove that buffer.
 		 */
 		dev_dbg(hyper_dmabuf_private.device,
-			"Buffer %d final released\n", sgt_info->hyper_dmabuf_id);
+			"Buffer {id:%d key:%d %d %d} final released\n",
+			sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+			sgt_info->hid.rng_key[2]);
 
 		if (!sgt_info->valid && !sgt_info->importer_exported &&
 		    !sgt_info->unexport_scheduled) {
 			hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
-			hyper_dmabuf_remove_exported(id);
+			hyper_dmabuf_remove_exported(hid);
 			kfree(sgt_info);
 			/* store hyper_dmabuf_id in the list for reuse */
-			store_reusable_id(id);
+			store_reusable_hid(hid);
 		}
 
 		break;

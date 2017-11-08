@@ -30,9 +30,9 @@
 #include <linux/module.h>
 #include <linux/workqueue.h>
 #include <linux/device.h>
+#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_conf.h"
 #include "hyper_dmabuf_msg.h"
-#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
 

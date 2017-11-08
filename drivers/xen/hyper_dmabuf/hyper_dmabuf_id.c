@@ -28,13 +28,14 @@
 
 #include <linux/list.h>
 #include <linux/slab.h>
-#include "hyper_dmabuf_msg.h"
+#include <linux/random.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_id.h"
+#include "hyper_dmabuf_msg.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
-void store_reusable_id(int id)
+void store_reusable_hid(hyper_dmabuf_id_t hid)
 {
 	struct list_reusable_id *reusable_head = hyper_dmabuf_private.id_queue;
 	struct list_reusable_id *new_reusable;
@@ -47,15 +48,15 @@ void store_reusable_id(int id)
 		return;
 	}
 
-	new_reusable->id = id;
+	new_reusable->hid = hid;
 
 	list_add(&new_reusable->list, &reusable_head->list);
 }
 
-static int retrieve_reusable_id(void)
+static hyper_dmabuf_id_t retrieve_reusable_hid(void)
 {
 	struct list_reusable_id *reusable_head = hyper_dmabuf_private.id_queue;
-	int id;
+	hyper_dmabuf_id_t hid = {-1, {0,0,0}};
 
 	/* check there is reusable id */
 	if (!list_empty(&reusable_head->list)) {
@@ -64,12 +65,11 @@ static int retrieve_reusable_id(void)
 						 list);
 
 		list_del(&reusable_head->list);
-		id = reusable_head->id;
+		hid = reusable_head->hid;
 		kfree(reusable_head);
-		return id;
 	}
 
-	return -ENOENT;
+	return hid;
 }
 
 void destroy_reusable_list(void)
@@ -92,31 +92,50 @@ void destroy_reusable_list(void)
 	}
 }
 
-int hyper_dmabuf_get_id(void)
+hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 {
-	static int id = 0;
+	static int count = 0;
+	hyper_dmabuf_id_t hid;
 	struct list_reusable_id *reusable_head;
-	int ret;
 
-	/* first cla to hyper_dmabuf_get_id */
-	if (id == 0) {
+	/* first call to hyper_dmabuf_get_id */
+	if (count == 0) {
 		reusable_head = kmalloc(sizeof(*reusable_head), GFP_KERNEL);
 
 		if (!reusable_head) {
 			dev_err(hyper_dmabuf_private.device,
 				"No memory left to be allocated\n");
-			return -ENOMEM;
+			return (hyper_dmabuf_id_t){-1, {0,0,0}};
 		}
 
-		reusable_head->id = -1; /* list head have invalid id */
+		reusable_head->hid.id = -1; /* list head has an invalid count */
 		INIT_LIST_HEAD(&reusable_head->list);
 		hyper_dmabuf_private.id_queue = reusable_head;
 	}
 
-	ret = retrieve_reusable_id();
+	hid = retrieve_reusable_hid();
 
-	if (ret < 0 && id < HYPER_DMABUF_ID_MAX)
-		return HYPER_DMABUF_ID_CREATE(hyper_dmabuf_private.domid, id++);
+	/*creating a new H-ID only if nothing in the reusable id queue
+	 * and count is less than maximum allowed
+	 */
+	if (hid.id == -1 && count < HYPER_DMABUF_ID_MAX) {
+		hid.id = HYPER_DMABUF_ID_CREATE(hyper_dmabuf_private.domid, count++);
+		/* random data embedded in the id for security */
+		get_random_bytes(&hid.rng_key[0], 12);
+	}
 
-	return ret;
+	return hid;
+}
+
+bool hyper_dmabuf_hid_keycomp(hyper_dmabuf_id_t hid1, hyper_dmabuf_id_t hid2)
+{
+	int i;
+
+	/* compare keys */
+	for (i=0; i<3; i++) {
+		if (hid1.rng_key[i] != hid2.rng_key[i])
+			return false;
+	}
+
+	return true;
 }

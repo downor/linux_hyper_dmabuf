@@ -35,13 +35,12 @@
 #include <linux/dma-buf.h>
 #include <linux/delay.h>
 #include <linux/list.h>
-#include <xen/hyper_dmabuf.h>
+#include "hyper_dmabuf_drv.h"
+#include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_ioctl.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_msg.h"
-#include "hyper_dmabuf_drv.h"
-#include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_imp.h"
 #include "hyper_dmabuf_query.h"
 
@@ -93,6 +92,8 @@ static int hyper_dmabuf_export_remote(struct file *filp, void *data)
 	struct hyper_dmabuf_sgt_info *sgt_info;
 	struct hyper_dmabuf_req *req;
 	int operands[MAX_NUMBER_OF_OPERANDS];
+	hyper_dmabuf_id_t hid;
+	int i;
 	int ret = 0;
 
 	if (!data) {
@@ -113,25 +114,27 @@ static int hyper_dmabuf_export_remote(struct file *filp, void *data)
 	 * to the same domain and if yes and it's valid sgt_info,
 	 * it returns hyper_dmabuf_id of pre-exported sgt_info
 	 */
-	ret = hyper_dmabuf_find_id_exported(dma_buf, export_remote_attr->remote_domain);
-	sgt_info = hyper_dmabuf_find_exported(ret);
-	if (ret != -ENOENT && sgt_info != NULL) {
-		if (sgt_info->valid) {
-			/*
-			 * Check if unexport is already scheduled for that buffer,
-			 * if so try to cancel it. If that will fail, buffer needs
-			 * to be reexport once again.
-			 */
-			if (sgt_info->unexport_scheduled) {
-				if (!cancel_delayed_work_sync(&sgt_info->unexport_work)) {
-					dma_buf_put(dma_buf);
-					goto reexport;
+	hid = hyper_dmabuf_find_hid_exported(dma_buf, export_remote_attr->remote_domain);
+	if (hid.id != -1) {
+		sgt_info = hyper_dmabuf_find_exported(hid);
+		if (sgt_info != NULL) {
+			if (sgt_info->valid) {
+				/*
+				 * Check if unexport is already scheduled for that buffer,
+				 * if so try to cancel it. If that will fail, buffer needs
+				 * to be reexport once again.
+				 */
+				if (sgt_info->unexport_scheduled) {
+					if (!cancel_delayed_work_sync(&sgt_info->unexport_work)) {
+						dma_buf_put(dma_buf);
+						goto reexport;
+					}
+					sgt_info->unexport_scheduled = 0;
 				}
-				sgt_info->unexport_scheduled = 0;
+				dma_buf_put(dma_buf);
+				export_remote_attr->hid = hid;
+				return 0;
 			}
-			dma_buf_put(dma_buf);
-			export_remote_attr->hyper_dmabuf_id = ret;
-			return 0;
 		}
 	}
 
@@ -141,11 +144,6 @@ reexport:
 		dev_err(hyper_dmabuf_private.device, "Cannot get attachment\n");
 		return PTR_ERR(attachment);
 	}
-
-	/* Clear ret, as that will cause whole ioctl to return failure
-	 * to userspace, which is not true
-	 */
-	ret = 0;
 
 	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
 
@@ -161,7 +159,15 @@ reexport:
 		return -ENOMEM;
 	}
 
-	sgt_info->hyper_dmabuf_id = hyper_dmabuf_get_id();
+	sgt_info->hid = hyper_dmabuf_get_hid();
+
+	/* no more exported dmabuf allowed */
+	if(sgt_info->hid.id == -1) {
+		dev_err(hyper_dmabuf_private.device,
+			"exceeds allowed number of dmabuf to be exported\n");
+		/* TODO: Cleanup sgt */
+		return -ENOMEM;
+	}
 
 	/* TODO: We might need to consider using port number on event channel? */
 	sgt_info->hyper_dmabuf_rdomain = export_remote_attr->remote_domain;
@@ -198,8 +204,8 @@ reexport:
 
 	sgt_info->active_sgts->sgt = sgt;
 	sgt_info->active_attached->attach = attachment;
-	sgt_info->va_kmapped->vaddr = NULL; /* first vaddr is NULL */
-	sgt_info->va_vmapped->vaddr = NULL; /* first vaddr is NULL */
+	sgt_info->va_kmapped->vaddr = NULL;
+	sgt_info->va_vmapped->vaddr = NULL;
 
 	/* initialize list of sgt, attachment and vaddr for dmabuf sync
 	 * via shadow dma-buf
@@ -221,23 +227,27 @@ reexport:
 	hyper_dmabuf_register_exported(sgt_info);
 
 	page_info->hyper_dmabuf_rdomain = sgt_info->hyper_dmabuf_rdomain;
-	page_info->hyper_dmabuf_id = sgt_info->hyper_dmabuf_id; /* may not be needed */
+	page_info->hid = sgt_info->hid; /* may not be needed */
 
-	export_remote_attr->hyper_dmabuf_id = sgt_info->hyper_dmabuf_id;
+	export_remote_attr->hid = sgt_info->hid;
 
 	/* now create request for importer via ring */
-	operands[0] = page_info->hyper_dmabuf_id;
-	operands[1] = page_info->nents;
-	operands[2] = page_info->frst_ofst;
-	operands[3] = page_info->last_len;
-	operands[4] = ops->share_pages (page_info->pages, export_remote_attr->remote_domain,
+	operands[0] = page_info->hid.id;
+
+	for (i=0; i<3; i++)
+		operands[i+1] = page_info->hid.rng_key[i];
+
+	operands[4] = page_info->nents;
+	operands[5] = page_info->frst_ofst;
+	operands[6] = page_info->last_len;
+	operands[7] = ops->share_pages (page_info->pages, export_remote_attr->remote_domain,
 					page_info->nents, &sgt_info->refs_info);
 
-	/* driver/application specific private info, max 32 bytes */
-	operands[5] = export_remote_attr->private[0];
-	operands[6] = export_remote_attr->private[1];
-	operands[7] = export_remote_attr->private[2];
-	operands[8] = export_remote_attr->private[3];
+	/* driver/application specific private info, max 4x4 bytes */
+	operands[8] = export_remote_attr->private[0];
+	operands[9] = export_remote_attr->private[1];
+	operands[10] = export_remote_attr->private[2];
+	operands[11] = export_remote_attr->private[3];
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
@@ -270,7 +280,7 @@ fail_send_request:
 	kfree(req);
 
 fail_map_req:
-	hyper_dmabuf_remove_exported(sgt_info->hyper_dmabuf_id);
+	hyper_dmabuf_remove_exported(sgt_info->hid);
 
 fail_export:
 	dma_buf_unmap_attachment(sgt_info->active_attached->attach,
@@ -298,7 +308,8 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 	struct hyper_dmabuf_imported_sgt_info *sgt_info;
 	struct hyper_dmabuf_req *req;
 	struct page **data_pages;
-	int operand;
+	int operands[4];
+	int i;
 	int ret = 0;
 
 	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
@@ -311,7 +322,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 	export_fd_attr = (struct ioctl_hyper_dmabuf_export_fd *)data;
 
 	/* look for dmabuf for the id */
-	sgt_info = hyper_dmabuf_find_imported(export_fd_attr->hyper_dmabuf_id);
+	sgt_info = hyper_dmabuf_find_imported(export_fd_attr->hid);
 
 	/* can't find sgt from the table */
 	if (!sgt_info) {
@@ -324,9 +335,14 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 	sgt_info->num_importers++;
 
 	/* send notification for export_fd to exporter */
-	operand = sgt_info->hyper_dmabuf_id;
+	operands[0] = sgt_info->hid.id;
 
-	dev_dbg(hyper_dmabuf_private.device, "Exporting fd of buffer %d\n", operand);
+	for (i=0; i<3; i++)
+		operands[i+1] = sgt_info->hid.rng_key[i];
+
+	dev_dbg(hyper_dmabuf_private.device, "Exporting fd of buffer {id:%d key:%d %d %d}\n",
+		sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+		sgt_info->hid.rng_key[2]);
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
@@ -336,30 +352,37 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 		return -ENOMEM;
 	}
 
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD, &operand);
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD, &operands[0]);
 
-	ret = ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, true);
+	ret = ops->send_req(HYPER_DMABUF_DOM_ID(sgt_info->hid), req, true);
 
 	if (ret < 0) {
 		/* in case of timeout other end eventually will receive request, so we need to undo it */
-		hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD_FAILED, &operand);
-		ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, false);
+		hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD_FAILED, &operands[0]);
+		ops->send_req(operands[0], req, false);
 		kfree(req);
 		dev_err(hyper_dmabuf_private.device, "Failed to create sgt or notify exporter\n");
 		sgt_info->num_importers--;
 		mutex_unlock(&hyper_dmabuf_private.lock);
 		return ret;
 	}
+
 	kfree(req);
 
 	if (ret == HYPER_DMABUF_REQ_ERROR) {
 		dev_err(hyper_dmabuf_private.device,
-			"Buffer invalid %d, cannot import\n", operand);
+			"Buffer invalid {id:%d key:%d %d %d}, cannot import\n",
+			sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+			sgt_info->hid.rng_key[2]);
+
 		sgt_info->num_importers--;
 		mutex_unlock(&hyper_dmabuf_private.lock);
 		return -EINVAL;
 	} else {
-		dev_dbg(hyper_dmabuf_private.device, "Can import buffer %d\n", operand);
+		dev_dbg(hyper_dmabuf_private.device, "Can import buffer {id:%d key:%d %d %d}\n",
+			sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+			sgt_info->hid.rng_key[2]);
+
 		ret = 0;
 	}
 
@@ -367,22 +390,29 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 		  "%s Found buffer gref %d  off %d last len %d nents %d domain %d\n", __func__,
 		  sgt_info->ref_handle, sgt_info->frst_ofst,
 		  sgt_info->last_len, sgt_info->nents,
-		  HYPER_DMABUF_DOM_ID(sgt_info->hyper_dmabuf_id));
+		  HYPER_DMABUF_DOM_ID(sgt_info->hid));
 
 	if (!sgt_info->sgt) {
 		dev_dbg(hyper_dmabuf_private.device,
-			"%s buffer %d pages not mapped yet\n", __func__,sgt_info->hyper_dmabuf_id);
+			"%s buffer {id:%d key:%d %d %d} pages not mapped yet\n", __func__,
+			sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+			sgt_info->hid.rng_key[2]);
+
 		data_pages = ops->map_shared_pages(sgt_info->ref_handle,
-						   HYPER_DMABUF_DOM_ID(sgt_info->hyper_dmabuf_id),
+						   HYPER_DMABUF_DOM_ID(sgt_info->hid),
 						   sgt_info->nents,
 						   &sgt_info->refs_info);
 
 		if (!data_pages) {
-			dev_err(hyper_dmabuf_private.device, "Cannot map pages of buffer %d\n", operand);
+			dev_err(hyper_dmabuf_private.device,
+				"Cannot map pages of buffer {id:%d key:%d %d %d}\n",
+				sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+				sgt_info->hid.rng_key[2]);
+
 			sgt_info->num_importers--;
 			req = kcalloc(1, sizeof(*req), GFP_KERNEL);
-			hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD_FAILED, &operand);
-			ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, false);
+			hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD_FAILED, &operands[0]);
+			ops->send_req(HYPER_DMABUF_DOM_ID(sgt_info->hid), req, false);
 			kfree(req);
 			mutex_unlock(&hyper_dmabuf_private.lock);
 			return -EINVAL;
@@ -401,6 +431,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 	}
 
 	mutex_unlock(&hyper_dmabuf_private.lock);
+
 	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
 	return ret;
 }
@@ -411,8 +442,8 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 {
 	struct hyper_dmabuf_req *req;
-	int hyper_dmabuf_id;
-	int ret;
+	int i, ret;
+	int operands[4];
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	struct hyper_dmabuf_sgt_info *sgt_info =
 		container_of(work, struct hyper_dmabuf_sgt_info, unexport_work.work);
@@ -420,10 +451,11 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 	if (!sgt_info)
 		return;
 
-	hyper_dmabuf_id = sgt_info->hyper_dmabuf_id;
-
 	dev_dbg(hyper_dmabuf_private.device,
-		"Marking buffer %d as invalid\n", hyper_dmabuf_id);
+		"Marking buffer {id:%d key:%d %d %d} as invalid\n",
+		sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+		sgt_info->hid.rng_key[2]);
+
 	/* no longer valid */
 	sgt_info->valid = 0;
 
@@ -435,12 +467,20 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 		return;
 	}
 
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &hyper_dmabuf_id);
+	operands[0] = sgt_info->hid.id;
+
+	for (i=0; i<3; i++)
+		operands[i+1] = sgt_info->hid.rng_key[i];
+
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &operands[0]);
 
 	/* Now send unexport request to remote domain, marking that buffer should not be used anymore */
 	ret = ops->send_req(sgt_info->hyper_dmabuf_rdomain, req, true);
 	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device, "unexport message for buffer %d failed\n", hyper_dmabuf_id);
+		dev_err(hyper_dmabuf_private.device,
+			"unexport message for buffer {id:%d key:%d %d %d} failed\n",
+			sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+			sgt_info->hid.rng_key[2]);
 	}
 
 	/* free msg */
@@ -456,12 +496,15 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 	 */
 	if (!sgt_info->importer_exported) {
 		dev_dbg(hyper_dmabuf_private.device,
-			"claning up buffer %d completly\n", hyper_dmabuf_id);
+			"claning up buffer {id:%d key:%d %d %d} completly\n",
+			sgt_info->hid.id, sgt_info->hid.rng_key[0], sgt_info->hid.rng_key[1],
+			sgt_info->hid.rng_key[2]);
+
 		hyper_dmabuf_cleanup_sgt_info(sgt_info, false);
-		hyper_dmabuf_remove_exported(hyper_dmabuf_id);
-		kfree(sgt_info);
+		hyper_dmabuf_remove_exported(sgt_info->hid);
 		/* register hyper_dmabuf_id to the list for reuse */
-		store_reusable_id(hyper_dmabuf_id);
+		store_reusable_hid(sgt_info->hid);
+		kfree(sgt_info);
 	}
 }
 
@@ -482,9 +525,12 @@ static int hyper_dmabuf_unexport(struct file *filp, void *data)
 	unexport_attr = (struct ioctl_hyper_dmabuf_unexport *)data;
 
 	/* find dmabuf in export list */
-	sgt_info = hyper_dmabuf_find_exported(unexport_attr->hyper_dmabuf_id);
+	sgt_info = hyper_dmabuf_find_exported(unexport_attr->hid);
 
-	dev_dbg(hyper_dmabuf_private.device, "scheduling unexport of buffer %d\n", unexport_attr->hyper_dmabuf_id);
+	dev_dbg(hyper_dmabuf_private.device,
+		"scheduling unexport of buffer {id:%d key:%d %d %d}\n",
+		unexport_attr->hid.id, unexport_attr->hid.rng_key[0],
+		unexport_attr->hid.rng_key[1], unexport_attr->hid.rng_key[2]);
 
 	/* failed to find corresponding entry in export list */
 	if (sgt_info == NULL) {
@@ -518,8 +564,8 @@ static int hyper_dmabuf_query(struct file *filp, void *data)
 
 	query_attr = (struct ioctl_hyper_dmabuf_query *)data;
 
-	sgt_info = hyper_dmabuf_find_exported(query_attr->hyper_dmabuf_id);
-	imported_sgt_info = hyper_dmabuf_find_imported(query_attr->hyper_dmabuf_id);
+	sgt_info = hyper_dmabuf_find_exported(query_attr->hid);
+	imported_sgt_info = hyper_dmabuf_find_imported(query_attr->hid);
 
 	/* if dmabuf can't be found in both lists, return */
 	if (!(sgt_info && imported_sgt_info)) {
@@ -544,7 +590,7 @@ static int hyper_dmabuf_query(struct file *filp, void *data)
 			if (sgt_info) {
 				query_attr->info = 0xFFFFFFFF; /* myself */
 			} else {
-				query_attr->info = (HYPER_DMABUF_DOM_ID(imported_sgt_info->hyper_dmabuf_id));
+				query_attr->info = HYPER_DMABUF_DOM_ID(imported_sgt_info->hid);
 			}
 			break;
 
@@ -674,10 +720,11 @@ static void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_inf
 
 	if (sgt_info->filp == filp) {
 		dev_dbg(hyper_dmabuf_private.device,
-			"Executing emergency release of buffer %d\n",
-			 sgt_info->hyper_dmabuf_id);
+			"Executing emergency release of buffer {id:%d key:%d %d %d}\n",
+			 sgt_info->hid.id, sgt_info->hid.rng_key[0],
+			 sgt_info->hid.rng_key[1], sgt_info->hid.rng_key[2]);
 
-		unexport_attr.hyper_dmabuf_id = sgt_info->hyper_dmabuf_id;
+		unexport_attr.hid = sgt_info->hid;
 		unexport_attr.delay_ms = 0;
 
 		hyper_dmabuf_unexport(filp, &unexport_attr);

@@ -26,11 +26,12 @@
 #define __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__
 
 #include <linux/device.h>
+#include <xen/hyper_dmabuf.h>
 
 struct hyper_dmabuf_req;
 
 struct list_reusable_id {
-	int id;
+	hyper_dmabuf_id_t hid;
 	struct list_head list;
 };
 

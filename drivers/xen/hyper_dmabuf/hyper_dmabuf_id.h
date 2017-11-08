@@ -25,24 +25,23 @@
 #ifndef __HYPER_DMABUF_ID_H__
 #define __HYPER_DMABUF_ID_H__
 
-/* Importer combine source domain id with given hyper_dmabuf_id
- * to make it unique in case there are multiple exporters */
+#define HYPER_DMABUF_ID_CREATE(domid, cnt) \
+        ((((domid) & 0xFF) << 24) | ((cnt) & 0xFFFFFF))
 
-#define HYPER_DMABUF_ID_CREATE(domid, id) \
-	((((domid) & 0xFF) << 24) | ((id) & 0xFFFFFF))
-
-#define HYPER_DMABUF_DOM_ID(id) \
-	(((id) >> 24) & 0xFF)
+#define HYPER_DMABUF_DOM_ID(hid) \
+        (((hid.id) >> 24) & 0xFF)
 
 /* currently maximum number of buffers shared
  * at any given moment is limited to 1000
  */
 #define HYPER_DMABUF_ID_MAX 1000
 
-void store_reusable_id(int id);
+void store_reusable_hid(hyper_dmabuf_id_t hid);
 
 void destroy_reusable_list(void);
 
-int hyper_dmabuf_get_id(void);
+hyper_dmabuf_id_t hyper_dmabuf_get_hid(void);
+
+bool hyper_dmabuf_hid_keycomp(hyper_dmabuf_id_t hid1, hyper_dmabuf_id_t hid2);
 
 #endif /*__HYPER_DMABUF_ID_H*/

@@ -25,6 +25,11 @@
 #ifndef __LINUX_PUBLIC_HYPER_DMABUF_H__
 #define __LINUX_PUBLIC_HYPER_DMABUF_H__
 
+typedef struct {
+        int id;
+        int rng_key[3]; /* 12bytes long random number */
+} hyper_dmabuf_id_t;
+
 #define IOCTL_HYPER_DMABUF_TX_CH_SETUP \
 _IOC(_IOC_NONE, 'G', 0, sizeof(struct ioctl_hyper_dmabuf_tx_ch_setup))
 struct ioctl_hyper_dmabuf_tx_ch_setup {
@@ -50,7 +55,7 @@ struct ioctl_hyper_dmabuf_export_remote {
 	/* Domain id to which buffer should be exported */
 	int remote_domain;
 	/* exported dma buf id */
-	int hyper_dmabuf_id;
+	hyper_dmabuf_id_t hid;
 	int private[4];
 };
 
@@ -59,7 +64,7 @@ _IOC(_IOC_NONE, 'G', 3, sizeof(struct ioctl_hyper_dmabuf_export_fd))
 struct ioctl_hyper_dmabuf_export_fd {
 	/* IN parameters */
 	/* hyper dmabuf id to be imported */
-	int hyper_dmabuf_id;
+	hyper_dmabuf_id_t hid;
 	/* flags */
 	int flags;
 	/* OUT parameters */
@@ -72,7 +77,7 @@ _IOC(_IOC_NONE, 'G', 4, sizeof(struct ioctl_hyper_dmabuf_unexport))
 struct ioctl_hyper_dmabuf_unexport {
 	/* IN parameters */
 	/* hyper dmabuf id to be unexported */
-	int hyper_dmabuf_id;
+	hyper_dmabuf_id_t hid;
 	/* delay in ms by which unexport processing will be postponed */
 	int delay_ms;
 	/* OUT parameters */
@@ -85,7 +90,7 @@ _IOC(_IOC_NONE, 'G', 5, sizeof(struct ioctl_hyper_dmabuf_query))
 struct ioctl_hyper_dmabuf_query {
 	/* in parameters */
 	/* hyper dmabuf id to be queried */
-	int hyper_dmabuf_id;
+	hyper_dmabuf_id_t hid;
 	/* item to be queried */
 	int item;
 	/* OUT parameters */
