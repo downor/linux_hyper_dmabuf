@@ -103,6 +103,12 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 
 	export_remote_attr = (struct ioctl_hyper_dmabuf_export_remote *)data;
 
+	if (hyper_dmabuf_private.domid == export_remote_attr->remote_domain) {
+		dev_err(hyper_dmabuf_private.device,
+			"exporting to the same VM is not permitted\n");
+		return -EINVAL;
+	}
+
 	dma_buf = dma_buf_get(export_remote_attr->dmabuf_fd);
 
 	if (IS_ERR(dma_buf)) {
