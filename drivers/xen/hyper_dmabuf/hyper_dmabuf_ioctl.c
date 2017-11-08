@@ -87,7 +87,7 @@ static int hyper_dmabuf_send_export_msg(struct hyper_dmabuf_sgt_info *sgt_info,
 {
 	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
 	struct hyper_dmabuf_req *req;
-	int operands[40] = {0};
+	int operands[MAX_NUMBER_OF_OPERANDS] = {0};
 	int ret, i;
 
 	/* now create request for importer via ring */
@@ -108,8 +108,10 @@ static int hyper_dmabuf_send_export_msg(struct hyper_dmabuf_sgt_info *sgt_info,
 		}
 	}
 
-	/* driver/application specific private info, max 4x4 bytes */
-	memcpy(&operands[8], &sgt_info->priv[0], sizeof(unsigned int) * 32);
+	operands[8] = sgt_info->sz_priv;
+
+	/* driver/application specific private info */
+	memcpy(&operands[9], sgt_info->priv, operands[8]);
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
@@ -181,8 +183,32 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 					sgt_info->unexport_scheduled = 0;
 				}
 
+				/* if there's any change in size of private data.
+				 * we reallocate space for private data with new size */
+				if (export_remote_attr->sz_priv != sgt_info->sz_priv) {
+					kfree(sgt_info->priv);
+
+					/* truncating size */
+					if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA) {
+						sgt_info->sz_priv = MAX_SIZE_PRIV_DATA;
+					} else {
+						sgt_info->sz_priv = export_remote_attr->sz_priv;
+					}
+
+					sgt_info->priv = kcalloc(1, sgt_info->sz_priv, GFP_KERNEL);
+
+					if(!sgt_info->priv) {
+						dev_err(hyper_dmabuf_private.device,
+							"Can't reallocate priv because there's no more space left\n");
+						hyper_dmabuf_remove_exported(sgt_info->hid);
+						hyper_dmabuf_cleanup_sgt_info(sgt_info, true);
+						kfree(sgt_info);
+						return -ENOMEM;
+					}
+				}
+
 				/* update private data in sgt_info with new ones */
-				memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 32);
+				copy_from_user(sgt_info->priv, export_remote_attr->priv, sgt_info->sz_priv);
 
 				/* send an export msg for updating priv in importer */
 				ret = hyper_dmabuf_send_export_msg(sgt_info, NULL);
@@ -220,6 +246,26 @@ reexport:
 		dev_err(hyper_dmabuf_private.device, "no more space left\n");
 		ret = -ENOMEM;
 		goto fail_sgt_info_creation;
+	}
+
+	/* possible truncation */
+	if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA) {
+		sgt_info->sz_priv = MAX_SIZE_PRIV_DATA;
+	} else {
+		sgt_info->sz_priv = export_remote_attr->sz_priv;
+	}
+
+	/* creating buffer for private data of buffer */
+	if(sgt_info->sz_priv != 0) {
+		sgt_info->priv = kcalloc(1, sgt_info->sz_priv, GFP_KERNEL);
+
+		if(!sgt_info->priv) {
+			dev_err(hyper_dmabuf_private.device, "no more space left\n");
+			ret = -ENOMEM;
+			goto fail_priv_creation;
+		}
+	} else {
+		dev_err(hyper_dmabuf_private.device, "size is 0\n");
 	}
 
 	sgt_info->hid = hyper_dmabuf_get_hid();
@@ -279,7 +325,7 @@ reexport:
 	INIT_LIST_HEAD(&sgt_info->va_vmapped->list);
 
 	/* copy private data to sgt_info */
-	memcpy(&sgt_info->priv[0], &export_remote_attr->priv[0], sizeof(unsigned int) * 32);
+	copy_from_user(sgt_info->priv, export_remote_attr->priv, sgt_info->sz_priv);
 
 	page_info = hyper_dmabuf_ext_pgs(sgt);
 	if (!page_info) {
@@ -329,6 +375,10 @@ fail_map_va_kmapped:
 
 fail_map_active_attached:
 	kfree(sgt_info->active_sgts);
+	kfree(sgt_info->priv);
+
+fail_priv_creation:
+	kfree(sgt_info);
 
 fail_map_active_sgts:
 fail_sgt_info_creation:
@@ -553,6 +603,10 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 		hyper_dmabuf_remove_exported(sgt_info->hid);
 		/* register hyper_dmabuf_id to the list for reuse */
 		store_reusable_hid(sgt_info->hid);
+
+		if (sgt_info->sz_priv > 0 && !sgt_info->priv)
+			kfree(sgt_info->priv);
+
 		kfree(sgt_info);
 	}
 }

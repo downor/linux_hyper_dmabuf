@@ -49,11 +49,12 @@ static void hyper_dmabuf_send_event_locked(struct hyper_dmabuf_event *e)
 
 	/* check current number of event then if it hits the max num allowed
 	 * then remove the oldest event in the list */
-	if (hyper_dmabuf_private.curr_num_event > MAX_NUMBER_OF_EVENT - 1) {
+	if (hyper_dmabuf_private.curr_num_event > MAX_DEPTH_EVENT_QUEUE - 1) {
 		oldest = list_first_entry(&hyper_dmabuf_private.event_list,
 				struct hyper_dmabuf_event, link);
 		list_del(&oldest->link);
 		hyper_dmabuf_private.curr_num_event--;
+		kfree(oldest);
 	}
 
 	list_add_tail(&e->link,
@@ -74,6 +75,7 @@ void hyper_dmabuf_events_release()
 	list_for_each_entry_safe(e, et, &hyper_dmabuf_private.event_list,
 				 link) {
 		list_del(&e->link);
+		kfree(e);
 		hyper_dmabuf_private.curr_num_event--;
 	}
 
@@ -104,8 +106,8 @@ int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 
 	e->event_data.hdr.event_type = HYPER_DMABUF_NEW_IMPORT;
 	e->event_data.hdr.hid = hid;
-	e->event_data.data = (void*)&imported_sgt_info->priv[0];
-	e->event_data.hdr.size = 128;
+	e->event_data.data = (void*)imported_sgt_info->priv;
+	e->event_data.hdr.size = imported_sgt_info->sz_priv;
 
 	spin_lock_irqsave(&hyper_dmabuf_private.event_lock, irqflags);
 

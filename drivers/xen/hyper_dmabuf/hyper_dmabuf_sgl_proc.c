@@ -255,6 +255,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct hyper_dmabuf_sgt_info *sgt_info, int fo
 	kfree(sgt_info->active_attached);
 	kfree(sgt_info->va_kmapped);
 	kfree(sgt_info->va_vmapped);
+	kfree(sgt_info->priv);
 
 	return 0;
 }

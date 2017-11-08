@@ -25,7 +25,7 @@
 #ifndef __HYPER_DMABUF_EVENT_H__
 #define __HYPER_DMABUF_EVENT_H__
 
-#define MAX_NUMBER_OF_EVENT 1024
+#define MAX_DEPTH_EVENT_QUEUE 32
 
 enum hyper_dmabuf_event_type {
 	HYPER_DMABUF_NEW_IMPORT = 0x10000,
