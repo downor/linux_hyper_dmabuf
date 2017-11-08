@@ -519,8 +519,9 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 
 	ring = &ring_info->ring_front;
 
-	if (RING_FULL(ring))
-		return -EBUSY;
+	while (RING_FULL(ring)) {
+		usleep_range(100, 120);
+	}
 
 	new_req = RING_GET_REQUEST(ring, ring->req_prod_pvt);
 	if (!new_req) {

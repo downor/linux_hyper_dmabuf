@@ -79,9 +79,10 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 		req->operands[0] = operands[0];
 		break;
 
-	case HYPER_DMABUF_FIRST_EXPORT:
-		/* dmabuf fd is being created on imported side for first time */
-		/* command : HYPER_DMABUF_FIRST_EXPORT,
+	case HYPER_DMABUF_EXPORT_FD:
+	case HYPER_DMABUF_EXPORT_FD_FAILED:
+		/* dmabuf fd is being created on imported side or importing failed */
+		/* command : HYPER_DMABUF_EXPORT_FD or HYPER_DMABUF_EXPORT_FD_FAILED,
 		 * operands0 : hyper_dmabuf_id
 		 */
 		req->operands[0] = operands[0];
@@ -244,8 +245,10 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	}
 
 	/* synchronous dma_buf_fd export */
-	if (req->command == HYPER_DMABUF_FIRST_EXPORT) {
+	if (req->command == HYPER_DMABUF_EXPORT_FD) {
 		/* find a corresponding SGT for the id */
+		dev_dbg(hyper_dmabuf_private.device,
+			"Processing HYPER_DMABUF_EXPORT_FD %d\n", req->operands[0]);
 		exp_sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
 
 		if (!exp_sgt_info) {
@@ -254,17 +257,32 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 			req->status = HYPER_DMABUF_REQ_ERROR;
 		} else if (!exp_sgt_info->valid) {
 			dev_dbg(hyper_dmabuf_private.device,
-				"Buffer no longer valid - cannot export\n");
+				"Buffer no longer valid - cannot export fd %d\n", req->operands[0]);
 			req->status = HYPER_DMABUF_REQ_ERROR;
 		} else {
 			dev_dbg(hyper_dmabuf_private.device,
-				"Buffer still valid - can export\n");
+				"Buffer still valid - can export fd%d\n", req->operands[0]);
 			exp_sgt_info->importer_exported++;
 			req->status = HYPER_DMABUF_REQ_PROCESSED;
 		}
 		return req->command;
 	}
 
+	if (req->command == HYPER_DMABUF_EXPORT_FD_FAILED) {
+		dev_dbg(hyper_dmabuf_private.device,
+			"Processing HYPER_DMABUF_EXPORT_FD_FAILED %d\n", req->operands[0]);
+		exp_sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
+
+		if (!exp_sgt_info) {
+			dev_err(hyper_dmabuf_private.device,
+				"critical err: requested sgt_info can't be found %d\n", req->operands[0]);
+			req->status = HYPER_DMABUF_REQ_ERROR;
+		} else {
+			exp_sgt_info->importer_exported--;
+			req->status = HYPER_DMABUF_REQ_PROCESSED;
+		}
+		return req->command;
+	}
 
 	dev_dbg(hyper_dmabuf_private.device,
 		"%s: putting request to workqueue\n", __func__);

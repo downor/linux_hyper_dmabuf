@@ -35,6 +35,7 @@
 #include <linux/dma-buf.h>
 #include <linux/delay.h>
 #include <linux/list.h>
+#include <xen/hyper_dmabuf.h>
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_ioctl.h"
 #include "hyper_dmabuf_list.h"
@@ -282,12 +283,17 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 	/* send notification for export_fd to exporter */
 	operand = sgt_info->hyper_dmabuf_id;
 
+	dev_dbg(hyper_dmabuf_private.device, "Exporting fd of buffer %d\n", operand);
+
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_FIRST_EXPORT, &operand);
+	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD, &operand);
 
 	ret = ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, true);
 
 	if (ret < 0) {
+		/* in case of timeout other end eventually will receive request, so we need to undo it */
+		hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD_FAILED, &operand);
+		ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, false);
 		kfree(req);
 		dev_err(hyper_dmabuf_private.device, "Failed to create sgt or notify exporter\n");
 		sgt_info->num_importers--;
@@ -298,12 +304,12 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 
 	if (ret == HYPER_DMABUF_REQ_ERROR) {
 		dev_err(hyper_dmabuf_private.device,
-			"Buffer invalid\n");
+			"Buffer invalid %d, cannot import\n", operand);
 		sgt_info->num_importers--;
 		mutex_unlock(&hyper_dmabuf_private.lock);
 		return -EINVAL;
 	} else {
-		dev_dbg(hyper_dmabuf_private.device, "Can import buffer\n");
+		dev_dbg(hyper_dmabuf_private.device, "Can import buffer %d\n", operand);
 		ret = 0;
 	}
 
@@ -322,7 +328,12 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 						   &sgt_info->refs_info);
 
 		if (!data_pages) {
+			dev_err(hyper_dmabuf_private.device, "Cannot map pages of buffer %d\n", operand);
 			sgt_info->num_importers--;
+			req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+			hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD_FAILED, &operand);
+			ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, false);
+			kfree(req);
 			mutex_unlock(&hyper_dmabuf_private.lock);
 			return -EINVAL;
 		}
