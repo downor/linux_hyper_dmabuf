@@ -25,7 +25,7 @@
 #ifndef __HYPER_DMABUF_MSG_H__
 #define __HYPER_DMABUF_MSG_H__
 
-#define MAX_NUMBER_OF_OPERANDS 9
+#define MAX_NUMBER_OF_OPERANDS 13
 
 struct hyper_dmabuf_req {
 	unsigned int request_id;

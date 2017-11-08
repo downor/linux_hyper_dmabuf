@@ -51,7 +51,7 @@ struct vmap_vaddr_list {
 
 /* Exporter builds pages_info before sharing pages */
 struct hyper_dmabuf_pages_info {
-        int hyper_dmabuf_id; /* unique id to reference dmabuf in source domain */
+        hyper_dmabuf_id_t hid; /* unique id to reference dmabuf in source domain */
         int hyper_dmabuf_rdomain; /* currenting considering just one remote domain access it */
         int frst_ofst; /* offset of data in the first page */
         int last_len; /* length of data in the last page */
@@ -64,22 +64,27 @@ struct hyper_dmabuf_pages_info {
  * Exporter stores references to sgt in a hash table
  * Exporter keeps these references for synchronization and tracking purposes
  *
- * Importer use this structure exporting to other drivers in the same domain */
+ * Importer use this structure exporting to other drivers in the same domain
+ */
 struct hyper_dmabuf_sgt_info {
-        int hyper_dmabuf_id; /* unique id to reference dmabuf in remote domain */
+        hyper_dmabuf_id_t hid; /* unique id to reference dmabuf in remote domain */
 	int hyper_dmabuf_rdomain; /* domain importing this sgt */
 
 	struct dma_buf *dma_buf; /* needed to store this for freeing it later */
 	int nents; /* number of pages, which may be different than sgt->nents */
+
+	/* list of remote activities on dma_buf */
 	struct sgt_list *active_sgts;
 	struct attachment_list *active_attached;
 	struct kmap_vaddr_list *va_kmapped;
 	struct vmap_vaddr_list *va_vmapped;
-	bool valid;
+
+	bool valid; /* set to 0 once unexported. Needed to prevent further mapping by importer */
 	int importer_exported; /* exported locally on importer's side */
 	void *refs_info; /* hypervisor-specific info for the references */
 	struct delayed_work unexport_work;
 	bool unexport_scheduled;
+
 	/* owner of buffer
 	 * TODO: that is naiive as buffer may be reused by
 	 * another userspace app, so here list of struct file should be kept
@@ -94,13 +99,16 @@ struct hyper_dmabuf_sgt_info {
  * Importer store these references in the table and map it in
  * its own memory map once userspace asks for reference for the buffer */
 struct hyper_dmabuf_imported_sgt_info {
-	int hyper_dmabuf_id; /* unique id to reference dmabuf (HYPER_DMABUF_ID_IMPORTER(source domain id, exporter's hyper_dmabuf_id */
+	hyper_dmabuf_id_t hid; /* unique id for shared dmabuf imported */
+
 	int ref_handle; /* reference number of top level addressing page of shared pages */
-	int frst_ofst;	/* start offset in shared page #1 */
+	int frst_ofst;	/* start offset in first shared page */
 	int last_len;	/* length of data in the last shared page */
 	int nents;	/* number of pages to be shared */
+
 	struct dma_buf *dma_buf;
 	struct sg_table *sgt; /* sgt pointer after importing buffer */
+
 	void *refs_info;
 	bool valid;
 	int num_importers;

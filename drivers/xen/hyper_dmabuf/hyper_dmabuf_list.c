@@ -36,6 +36,7 @@
 #include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_list.h"
+#include "hyper_dmabuf_id.h"
 
 extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
@@ -51,13 +52,15 @@ static ssize_t hyper_dmabuf_imported_show(struct device *drv, struct device_attr
 	size_t total = 0;
 
 	hash_for_each(hyper_dmabuf_hash_imported, bkt, info_entry, node) {
-		int id = info_entry->info->hyper_dmabuf_id;
+		hyper_dmabuf_id_t hid = info_entry->info->hid;
 		int nents = info_entry->info->nents;
 		bool valid = info_entry->info->valid;
 		int num_importers = info_entry->info->num_importers;
 		total += nents;
-		count += scnprintf(buf + count, PAGE_SIZE - count, "id:%d, nents:%d, v:%c, numi:%d\n",
-				   id, nents, (valid ? 't' : 'f'), num_importers);
+		count += scnprintf(buf + count, PAGE_SIZE - count,
+				   "hid:{id:%d keys:%d %d %d}, nents:%d, v:%c, numi:%d\n",
+				   hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2],
+				   nents, (valid ? 't' : 'f'), num_importers);
 	}
 	count += scnprintf(buf + count, PAGE_SIZE - count, "total nents: %lu\n",
 			   total);
@@ -73,13 +76,15 @@ static ssize_t hyper_dmabuf_exported_show(struct device *drv, struct device_attr
 	size_t total = 0;
 
 	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node) {
-		int id = info_entry->info->hyper_dmabuf_id;
+		hyper_dmabuf_id_t hid = info_entry->info->hid;
 		int nents = info_entry->info->nents;
 		bool valid = info_entry->info->valid;
 		int importer_exported = info_entry->info->importer_exported;
 		total += nents;
-		count += scnprintf(buf + count, PAGE_SIZE - count, "id:%d, nents:%d, v:%c, ie:%d\n",
-				   id, nents, (valid ? 't' : 'f'), importer_exported);
+		count += scnprintf(buf + count, PAGE_SIZE - count,
+				   "hid:{hid:%d keys:%d %d %d}, nents:%d, v:%c, ie:%d\n",
+				   hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2],
+				   nents, (valid ? 't' : 'f'), importer_exported);
 	}
 	count += scnprintf(buf + count, PAGE_SIZE - count, "total nents: %lu\n",
 			   total);
@@ -144,7 +149,7 @@ int hyper_dmabuf_register_exported(struct hyper_dmabuf_sgt_info *info)
 	info_entry->info = info;
 
 	hash_add(hyper_dmabuf_hash_exported, &info_entry->node,
-		 info_entry->info->hyper_dmabuf_id);
+		 info_entry->info->hid.id);
 
 	return 0;
 }
@@ -164,74 +169,102 @@ int hyper_dmabuf_register_imported(struct hyper_dmabuf_imported_sgt_info* info)
 	info_entry->info = info;
 
 	hash_add(hyper_dmabuf_hash_imported, &info_entry->node,
-		 info_entry->info->hyper_dmabuf_id);
+		 info_entry->info->hid.id);
 
 	return 0;
 }
 
-struct hyper_dmabuf_sgt_info *hyper_dmabuf_find_exported(int id)
+struct hyper_dmabuf_sgt_info *hyper_dmabuf_find_exported(hyper_dmabuf_id_t hid)
 {
 	struct hyper_dmabuf_info_entry_exported *info_entry;
 	int bkt;
 
 	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node)
-		if(info_entry->info->hyper_dmabuf_id == id)
-			return info_entry->info;
+		/* checking hid.id first */
+		if(info_entry->info->hid.id == hid.id) {
+			/* then key is compared */
+			if(hyper_dmabuf_hid_keycomp(info_entry->info->hid, hid))
+				return info_entry->info;
+			/* if key is unmatched, given HID is invalid, so returning NULL */
+			else
+				break;
+		}
 
 	return NULL;
 }
 
 /* search for pre-exported sgt and return id of it if it exist */
-int hyper_dmabuf_find_id_exported(struct dma_buf *dmabuf, int domid)
+hyper_dmabuf_id_t hyper_dmabuf_find_hid_exported(struct dma_buf *dmabuf, int domid)
 {
 	struct hyper_dmabuf_info_entry_exported *info_entry;
+	hyper_dmabuf_id_t hid = {-1, {0, 0, 0}};
 	int bkt;
 
 	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node)
 		if(info_entry->info->dma_buf == dmabuf &&
 		   info_entry->info->hyper_dmabuf_rdomain == domid)
-			return info_entry->info->hyper_dmabuf_id;
+			return info_entry->info->hid;
 
-	return -ENOENT;
+	return hid;
 }
 
-struct hyper_dmabuf_imported_sgt_info *hyper_dmabuf_find_imported(int id)
+struct hyper_dmabuf_imported_sgt_info *hyper_dmabuf_find_imported(hyper_dmabuf_id_t hid)
 {
 	struct hyper_dmabuf_info_entry_imported *info_entry;
 	int bkt;
 
 	hash_for_each(hyper_dmabuf_hash_imported, bkt, info_entry, node)
-		if(info_entry->info->hyper_dmabuf_id == id)
-			return info_entry->info;
+		/* checking hid.id first */
+		if(info_entry->info->hid.id == hid.id) {
+			/* then key is compared */
+			if(hyper_dmabuf_hid_keycomp(info_entry->info->hid, hid))
+				return info_entry->info;
+			/* if key is unmatched, given HID is invalid, so returning NULL */
+			else {
+				break;
+			}
+		}
 
 	return NULL;
 }
 
-int hyper_dmabuf_remove_exported(int id)
+int hyper_dmabuf_remove_exported(hyper_dmabuf_id_t hid)
 {
 	struct hyper_dmabuf_info_entry_exported *info_entry;
 	int bkt;
 
 	hash_for_each(hyper_dmabuf_hash_exported, bkt, info_entry, node)
-		if(info_entry->info->hyper_dmabuf_id == id) {
-			hash_del(&info_entry->node);
-			kfree(info_entry);
-			return 0;
+		/* checking hid.id first */
+		if(info_entry->info->hid.id == hid.id) {
+			/* then key is compared */
+			if(hyper_dmabuf_hid_keycomp(info_entry->info->hid, hid)) {
+				hash_del(&info_entry->node);
+				kfree(info_entry);
+				return 0;
+			} else {
+				break;
+			}
 		}
 
 	return -ENOENT;
 }
 
-int hyper_dmabuf_remove_imported(int id)
+int hyper_dmabuf_remove_imported(hyper_dmabuf_id_t hid)
 {
 	struct hyper_dmabuf_info_entry_imported *info_entry;
 	int bkt;
 
 	hash_for_each(hyper_dmabuf_hash_imported, bkt, info_entry, node)
-		if(info_entry->info->hyper_dmabuf_id == id) {
-			hash_del(&info_entry->node);
-			kfree(info_entry);
-			return 0;
+		/* checking hid.id first */
+		if(info_entry->info->hid.id == hid.id) {
+			/* then key is compared */
+			if(hyper_dmabuf_hid_keycomp(info_entry->info->hid, hid)) {
+				hash_del(&info_entry->node);
+				kfree(info_entry);
+				return 0;
+			} else {
+				break;
+			}
 		}
 
 	return -ENOENT;

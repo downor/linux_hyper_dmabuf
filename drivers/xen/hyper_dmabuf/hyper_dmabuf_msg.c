@@ -60,32 +60,36 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 	case HYPER_DMABUF_EXPORT:
 		/* exporting pages for dmabuf */
 		/* command : HYPER_DMABUF_EXPORT,
-		 * operands0 : hyper_dmabuf_id
-		 * operands1 : number of pages to be shared
-		 * operands2 : offset of data in the first page
-		 * operands3 : length of data in the last page
-		 * operands4 : top-level reference number for shared pages
-		 * operands5~8 : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * operands0~3 : hyper_dmabuf_id
+		 * operands4 : number of pages to be shared
+		 * operands5 : offset of data in the first page
+		 * operands6 : length of data in the last page
+		 * operands7 : top-level reference number for shared pages
+		 * operands8~11 : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
-		for (i=0; i < 8; i++)
+		for (i=0; i < 11; i++)
 			req->operands[i] = operands[i];
 		break;
 
 	case HYPER_DMABUF_NOTIFY_UNEXPORT:
 		/* destroy sg_list for hyper_dmabuf_id on remote side */
 		/* command : DMABUF_DESTROY,
-		 * operands0 : hyper_dmabuf_id
+		 * operands0~3 : hyper_dmabuf_id_t hid
 		 */
-		req->operands[0] = operands[0];
+
+		for (i=0; i < 4; i++)
+			req->operands[i] = operands[i];
 		break;
 
 	case HYPER_DMABUF_EXPORT_FD:
 	case HYPER_DMABUF_EXPORT_FD_FAILED:
 		/* dmabuf fd is being created on imported side or importing failed */
 		/* command : HYPER_DMABUF_EXPORT_FD or HYPER_DMABUF_EXPORT_FD_FAILED,
-		 * operands0 : hyper_dmabuf_id
+		 * operands0~3 : hyper_dmabuf_id
 		 */
-		req->operands[0] = operands[0];
+
+		for (i=0; i < 4; i++)
+			req->operands[i] = operands[i];
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
@@ -98,10 +102,10 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 		/* notifying dmabuf map/unmap to exporter, map will make the driver to do shadow mapping
 		* or unmapping for synchronization with original exporter (e.g. i915) */
 		/* command : DMABUF_OPS_TO_SOURCE.
-		 * operands0 : hyper_dmabuf_id
-		 * operands1 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
+		 * operands0~3 : hyper_dmabuf_id
+		 * operands4 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
 		 */
-		for (i = 0; i < 2; i++)
+		for (i = 0; i < 5; i++)
 			req->operands[i] = operands[i];
 		break;
 
@@ -126,12 +130,12 @@ void cmd_process_work(struct work_struct *work)
 	case HYPER_DMABUF_EXPORT:
 		/* exporting pages for dmabuf */
 		/* command : HYPER_DMABUF_EXPORT,
-		 * operands0 : hyper_dmabuf_id
-		 * operands1 : number of pages to be shared
-		 * operands2 : offset of data in the first page
-		 * operands3 : length of data in the last page
-		 * operands4 : top-level reference number for shared pages
-		 * operands5~8 : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * operands0~3 : hyper_dmabuf_id
+		 * operands4 : number of pages to be shared
+		 * operands5 : offset of data in the first page
+		 * operands6 : length of data in the last page
+		 * operands7 : top-level reference number for shared pages
+		 * operands8~11 : Driver-specific private data (e.g. graphic buffer's meta info)
 		 */
 		imported_sgt_info = kcalloc(1, sizeof(*imported_sgt_info), GFP_KERNEL);
 
@@ -141,25 +145,31 @@ void cmd_process_work(struct work_struct *work)
 			break;
 		}
 
-		imported_sgt_info->hyper_dmabuf_id = req->operands[0];
-		imported_sgt_info->frst_ofst = req->operands[2];
-		imported_sgt_info->last_len = req->operands[3];
-		imported_sgt_info->nents = req->operands[1];
-		imported_sgt_info->ref_handle = req->operands[4];
+		imported_sgt_info->hid.id = req->operands[0];
+
+		for (i=0; i<3; i++)
+			imported_sgt_info->hid.rng_key[i] = req->operands[i+1];
+
+		imported_sgt_info->nents = req->operands[4];
+		imported_sgt_info->frst_ofst = req->operands[5];
+		imported_sgt_info->last_len = req->operands[6];
+		imported_sgt_info->ref_handle = req->operands[7];
 
 		dev_dbg(hyper_dmabuf_private.device, "DMABUF was exported\n");
-		dev_dbg(hyper_dmabuf_private.device, "\thyper_dmabuf_id %d\n", req->operands[0]);
-		dev_dbg(hyper_dmabuf_private.device, "\tnents %d\n", req->operands[1]);
-		dev_dbg(hyper_dmabuf_private.device, "\tfirst offset %d\n", req->operands[2]);
-		dev_dbg(hyper_dmabuf_private.device, "\tlast len %d\n", req->operands[3]);
-		dev_dbg(hyper_dmabuf_private.device, "\tgrefid %d\n", req->operands[4]);
+		dev_dbg(hyper_dmabuf_private.device, "\thid{id:%d key:%d %d %d}\n",
+			req->operands[0], req->operands[1], req->operands[2],
+			req->operands[3]);
+		dev_dbg(hyper_dmabuf_private.device, "\tnents %d\n", req->operands[4]);
+		dev_dbg(hyper_dmabuf_private.device, "\tfirst offset %d\n", req->operands[5]);
+		dev_dbg(hyper_dmabuf_private.device, "\tlast len %d\n", req->operands[6]);
+		dev_dbg(hyper_dmabuf_private.device, "\tgrefid %d\n", req->operands[7]);
 
 		for (i=0; i<4; i++)
-			imported_sgt_info->private[i] = req->operands[5+i];
+			imported_sgt_info->private[i] = req->operands[8+i];
 
 		imported_sgt_info->valid = 1;
 		hyper_dmabuf_register_imported(imported_sgt_info);
-		break;
+	break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
 		/* notifying dmabuf map/unmap to importer (probably not needed) */
@@ -182,6 +192,8 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	struct hyper_dmabuf_req *temp_req;
 	struct hyper_dmabuf_imported_sgt_info *sgt_info;
 	struct hyper_dmabuf_sgt_info *exp_sgt_info;
+	hyper_dmabuf_id_t hid = {req->operands[0], /* hid.id */
+			       {req->operands[1], req->operands[2], req->operands[3]}}; /* hid.rng_key */
 	int ret;
 
 	if (!req) {
@@ -203,12 +215,12 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	if (req->command == HYPER_DMABUF_NOTIFY_UNEXPORT) {
 		/* destroy sg_list for hyper_dmabuf_id on remote side */
 		/* command : HYPER_DMABUF_NOTIFY_UNEXPORT,
-		 * operands0 : hyper_dmabuf_id
+		 * operands0~3 : hyper_dmabuf_id
 		 */
 		dev_dbg(hyper_dmabuf_private.device,
 			"%s: processing HYPER_DMABUF_NOTIFY_UNEXPORT\n", __func__);
 
-		sgt_info = hyper_dmabuf_find_imported(req->operands[0]);
+		sgt_info = hyper_dmabuf_find_imported(hid);
 
 		if (sgt_info) {
 			/* if anything is still using dma_buf */
@@ -220,7 +232,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 				sgt_info->valid = 0;
 			} else {
 				/* No one is using buffer, remove it from imported list */
-				hyper_dmabuf_remove_imported(req->operands[0]);
+				hyper_dmabuf_remove_imported(hid);
 				kfree(sgt_info);
 			}
 		} else {
@@ -236,13 +248,14 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		 * or unmapping for synchronization with original exporter (e.g. i915) */
 
 		/* command : DMABUF_OPS_TO_SOURCE.
-		 * operands0 : hyper_dmabuf_id
+		 * operands0~3 : hyper_dmabuf_id
 		 * operands1 : enum hyper_dmabuf_ops {....}
 		 */
 		dev_dbg(hyper_dmabuf_private.device,
 			"%s: HYPER_DMABUF_OPS_TO_SOURCE\n", __func__);
 
-		ret = hyper_dmabuf_remote_sync(req->operands[0], req->operands[1]);
+		ret = hyper_dmabuf_remote_sync(hid, req->operands[4]);
+
 		if (ret)
 			req->status = HYPER_DMABUF_REQ_ERROR;
 		else
@@ -255,20 +268,28 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	if (req->command == HYPER_DMABUF_EXPORT_FD) {
 		/* find a corresponding SGT for the id */
 		dev_dbg(hyper_dmabuf_private.device,
-			"Processing HYPER_DMABUF_EXPORT_FD %d\n", req->operands[0]);
-		exp_sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
+			"Processing HYPER_DMABUF_EXPORT_FD for buffer {id:%d key:%d %d %d}\n",
+			hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+
+		exp_sgt_info = hyper_dmabuf_find_exported(hid);
 
 		if (!exp_sgt_info) {
 			dev_err(hyper_dmabuf_private.device,
-				"critical err: requested sgt_info can't be found %d\n", req->operands[0]);
+				"critical err: requested sgt_info can't be found for buffer {id:%d key:%d %d %d}\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+
 			req->status = HYPER_DMABUF_REQ_ERROR;
 		} else if (!exp_sgt_info->valid) {
 			dev_dbg(hyper_dmabuf_private.device,
-				"Buffer no longer valid - cannot export fd %d\n", req->operands[0]);
+				"Buffer no longer valid - cannot export fd for buffer {id:%d key:%d %d %d}\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+
 			req->status = HYPER_DMABUF_REQ_ERROR;
 		} else {
 			dev_dbg(hyper_dmabuf_private.device,
-				"Buffer still valid - can export fd%d\n", req->operands[0]);
+				"Buffer still valid - can export fd for buffer {id:%d key:%d %d %d}\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+
 			exp_sgt_info->importer_exported++;
 			req->status = HYPER_DMABUF_REQ_PROCESSED;
 		}
@@ -277,12 +298,16 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 
 	if (req->command == HYPER_DMABUF_EXPORT_FD_FAILED) {
 		dev_dbg(hyper_dmabuf_private.device,
-			"Processing HYPER_DMABUF_EXPORT_FD_FAILED %d\n", req->operands[0]);
-		exp_sgt_info = hyper_dmabuf_find_exported(req->operands[0]);
+			"Processing HYPER_DMABUF_EXPORT_FD_FAILED for buffer {id:%d key:%d %d %d}\n",
+			hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+
+		exp_sgt_info = hyper_dmabuf_find_exported(hid);
 
 		if (!exp_sgt_info) {
 			dev_err(hyper_dmabuf_private.device,
-				"critical err: requested sgt_info can't be found %d\n", req->operands[0]);
+				"critical err: requested sgt_info can't be found for buffer {id:%d key:%d %d %d}\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+
 			req->status = HYPER_DMABUF_REQ_ERROR;
 		} else {
 			exp_sgt_info->importer_exported--;

@@ -29,8 +29,6 @@
 #include "xen/xenbus.h"
 #include "../hyper_dmabuf_msg.h"
 
-#define MAX_NUMBER_OF_OPERANDS 9
-
 DEFINE_RING_TYPES(xen_comm, struct hyper_dmabuf_req, struct hyper_dmabuf_resp);
 
 struct xen_comm_tx_ring_info {
