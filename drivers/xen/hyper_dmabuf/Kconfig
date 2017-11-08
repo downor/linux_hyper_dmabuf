@@ -29,4 +29,14 @@ config HYPER_DMABUF_EVENT_GEN
 	  shared DMA-BUF is available. Events in the list can be retrieved by
 	  read operation.
 
+config HYPER_DMABUF_XEN_AUTO_RX_CH_ADD
+	bool "Enable automatic rx-ch add with 10 secs interval"
+	default y
+	depends on HYPER_DMABUF && HYPER_DMABUF_XEN
+	help
+	  If enabled, driver reads a node in xenstore every 10 seconds
+	  to check whether there is any tx comm ch configured by another
+	  domain then initialize matched rx comm ch automatically for any
+	  existing tx comm chs.
+
 endmenu

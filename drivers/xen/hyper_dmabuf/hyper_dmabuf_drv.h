@@ -64,6 +64,9 @@ struct hyper_dmabuf_private {
 	struct mutex event_read_lock;
 
 	int curr_num_event;
+
+	/* indicate whether the driver is unloaded */
+	bool exited;
 };
 
 struct list_reusable_id {
