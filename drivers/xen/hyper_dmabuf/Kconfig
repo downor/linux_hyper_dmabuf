@@ -14,6 +14,7 @@ config HYPER_DMABUF_XEN
 config HYPER_DMABUF_SYSFS
 	bool "Enable sysfs information about hyper DMA buffers"
 	default y
+	depends on HYPER_DMABUF
 	help
 	  Expose information about imported and exported buffers using
 	  hyper_dmabuf driver

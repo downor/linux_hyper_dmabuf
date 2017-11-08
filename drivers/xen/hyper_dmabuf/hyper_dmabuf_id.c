@@ -40,6 +40,13 @@ void store_reusable_id(int id)
 	struct list_reusable_id *new_reusable;
 
 	new_reusable = kmalloc(sizeof(*new_reusable), GFP_KERNEL);
+
+	if (!new_reusable) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		return;
+	}
+
 	new_reusable->id = id;
 
 	list_add(&new_reusable->list, &reusable_head->list);
@@ -94,6 +101,13 @@ int hyper_dmabuf_get_id(void)
 	/* first cla to hyper_dmabuf_get_id */
 	if (id == 0) {
 		reusable_head = kmalloc(sizeof(*reusable_head), GFP_KERNEL);
+
+		if (!reusable_head) {
+			dev_err(hyper_dmabuf_private.device,
+				"No memory left to be allocated\n");
+			return -ENOMEM;
+		}
+
 		reusable_head->id = -1; /* list head have invalid id */
 		INIT_LIST_HEAD(&reusable_head->list);
 		hyper_dmabuf_private.id_queue = reusable_head;

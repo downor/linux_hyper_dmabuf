@@ -381,6 +381,12 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 
 	ring_info = kmalloc(sizeof(*ring_info), GFP_KERNEL);
 
+	if (!ring_info) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		return -ENOMEM;
+	}
+
 	ring_info->sdomain = domid;
 	ring_info->evtchn = rx_port;
 

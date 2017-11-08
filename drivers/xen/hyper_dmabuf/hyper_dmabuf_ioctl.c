@@ -115,22 +115,24 @@ static int hyper_dmabuf_export_remote(struct file *filp, void *data)
 	 */
 	ret = hyper_dmabuf_find_id_exported(dma_buf, export_remote_attr->remote_domain);
 	sgt_info = hyper_dmabuf_find_exported(ret);
-	if (ret != -ENOENT && sgt_info->valid) {
-		/*
-		 * Check if unexport is already scheduled for that buffer,
-		 * if so try to cancel it. If that will fail, buffer needs
-		 * to be reexport once again.
-		 */
-		if (sgt_info->unexport_scheduled) {
-			if (!cancel_delayed_work_sync(&sgt_info->unexport_work)) {
-				dma_buf_put(dma_buf);
-				goto reexport;
+	if (ret != -ENOENT && sgt_info != NULL) {
+		if (sgt_info->valid) {
+			/*
+			 * Check if unexport is already scheduled for that buffer,
+			 * if so try to cancel it. If that will fail, buffer needs
+			 * to be reexport once again.
+			 */
+			if (sgt_info->unexport_scheduled) {
+				if (!cancel_delayed_work_sync(&sgt_info->unexport_work)) {
+					dma_buf_put(dma_buf);
+					goto reexport;
+				}
+				sgt_info->unexport_scheduled = 0;
 			}
-			sgt_info->unexport_scheduled = 0;
+			dma_buf_put(dma_buf);
+			export_remote_attr->hyper_dmabuf_id = ret;
+			return 0;
 		}
-		dma_buf_put(dma_buf);
-		export_remote_attr->hyper_dmabuf_id = ret;
-		return 0;
 	}
 
 reexport:
@@ -162,9 +164,32 @@ reexport:
 	sgt_info->valid = 1;
 
 	sgt_info->active_sgts = kmalloc(sizeof(struct sgt_list), GFP_KERNEL);
+	if (!sgt_info->active_sgts) {
+		dev_err(hyper_dmabuf_private.device, "no more space left\n");
+		ret = -ENOMEM;
+		goto fail_map_active_sgts;
+	}
+
 	sgt_info->active_attached = kmalloc(sizeof(struct attachment_list), GFP_KERNEL);
+	if (!sgt_info->active_attached) {
+		dev_err(hyper_dmabuf_private.device, "no more space left\n");
+		ret = -ENOMEM;
+		goto fail_map_active_attached;
+	}
+
 	sgt_info->va_kmapped = kmalloc(sizeof(struct kmap_vaddr_list), GFP_KERNEL);
+	if (!sgt_info->va_kmapped) {
+		dev_err(hyper_dmabuf_private.device, "no more space left\n");
+		ret = -ENOMEM;
+		goto fail_map_va_kmapped;
+	}
+
 	sgt_info->va_vmapped = kmalloc(sizeof(struct vmap_vaddr_list), GFP_KERNEL);
+	if (!sgt_info->va_vmapped) {
+		dev_err(hyper_dmabuf_private.device, "no more space left\n");
+		ret = -ENOMEM;
+		goto fail_map_va_vmapped;
+	}
 
 	sgt_info->active_sgts->sgt = sgt;
 	sgt_info->active_attached->attach = attachment;
@@ -211,6 +236,11 @@ reexport:
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
+	if(!req) {
+		dev_err(hyper_dmabuf_private.device, "no more space left\n");
+		goto fail_map_req;
+	}
+
 	/* composing a message to the importer */
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT, &operands[0]);
 
@@ -233,6 +263,8 @@ reexport:
 
 fail_send_request:
 	kfree(req);
+
+fail_map_req:
 	hyper_dmabuf_remove_exported(sgt_info->hyper_dmabuf_id);
 
 fail_export:
@@ -242,10 +274,14 @@ fail_export:
 	dma_buf_detach(sgt_info->dma_buf, sgt_info->active_attached->attach);
 	dma_buf_put(sgt_info->dma_buf);
 
-	kfree(sgt_info->active_attached);
-	kfree(sgt_info->active_sgts);
-	kfree(sgt_info->va_kmapped);
 	kfree(sgt_info->va_vmapped);
+fail_map_va_vmapped:
+	kfree(sgt_info->va_kmapped);
+fail_map_va_kmapped:
+	kfree(sgt_info->active_sgts);
+fail_map_active_sgts:
+	kfree(sgt_info->active_attached);
+fail_map_active_attached:
 
 	return ret;
 }
@@ -288,6 +324,13 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 	dev_dbg(hyper_dmabuf_private.device, "Exporting fd of buffer %d\n", operand);
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+
+	if (!req) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		return -ENOMEM;
+	}
+
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT_FD, &operand);
 
 	ret = ops->send_req(HYPER_DMABUF_DOM_ID(operand), req, true);
@@ -380,6 +423,12 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 	sgt_info->valid = 0;
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
+
+	if (!req) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		return;
+	}
 
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &hyper_dmabuf_id);
 
@@ -540,6 +589,11 @@ static long hyper_dmabuf_ioctl(struct file *filp,
 	hyper_dmabuf_ioctl_t func;
 	char *kdata;
 
+	if (nr > ARRAY_SIZE(hyper_dmabuf_ioctls)) {
+		dev_err(hyper_dmabuf_private.device, "invalid ioctl\n");
+		return -EINVAL;
+	}
+
 	ioctl = &hyper_dmabuf_ioctls[nr];
 
 	func = ioctl->func;
@@ -574,11 +628,34 @@ static long hyper_dmabuf_ioctl(struct file *filp,
 
 int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 {
+	int ret = 0;
+
 	/* Do not allow exclusive open */
 	if (filp->f_flags & O_EXCL)
 		return -EBUSY;
 
-	return 0;
+	/*
+	 * Initialize backend if neededm,
+	 * use mutex to prevent race conditions when
+	 * two userspace apps will open device at the same time
+	 */
+	mutex_lock(&hyper_dmabuf_private.lock);
+
+	if (!hyper_dmabuf_private.backend_initialized) {
+		hyper_dmabuf_private.domid = hyper_dmabuf_private.backend_ops->get_vm_id();
+
+		ret = hyper_dmabuf_private.backend_ops->init_comm_env();
+	        if (ret < 0) {
+			dev_err(hyper_dmabuf_private.device,
+				"failed to initiailize hypervisor-specific comm env\n");
+		} else {
+			hyper_dmabuf_private.backend_initialized = true;
+		}
+	}
+
+	mutex_unlock(&hyper_dmabuf_private.lock);
+
+	return ret;
 }
 
 static void hyper_dmabuf_emergency_release(struct hyper_dmabuf_sgt_info* sgt_info,

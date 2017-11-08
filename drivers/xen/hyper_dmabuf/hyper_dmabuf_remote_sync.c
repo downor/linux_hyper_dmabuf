@@ -78,6 +78,12 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_ATTACH:
 		attachl = kcalloc(1, sizeof(*attachl), GFP_KERNEL);
 
+		if (!attachl) {
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_ATTACH\n");
+			return -ENOMEM;
+		}
+
 		attachl->attach = dma_buf_attach(sgt_info->dma_buf,
 						 hyper_dmabuf_private.device);
 
@@ -85,7 +91,7 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 			kfree(attachl);
 			dev_err(hyper_dmabuf_private.device,
 				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_ATTACH\n");
-			return PTR_ERR(attachl->attach);
+			return -ENOMEM;
 		}
 
 		list_add(&attachl->list, &sgt_info->active_attached->list);
@@ -121,12 +127,19 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 					   struct attachment_list, list);
 
 		sgtl = kcalloc(1, sizeof(*sgtl), GFP_KERNEL);
+
+		if (!sgtl) {
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_MAP\n");
+			return -ENOMEM;
+		}
+
 		sgtl->sgt = dma_buf_map_attachment(attachl->attach, DMA_BIDIRECTIONAL);
 		if (!sgtl->sgt) {
 			kfree(sgtl);
 			dev_err(hyper_dmabuf_private.device,
 				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_MAP\n");
-			return PTR_ERR(sgtl->sgt);
+			return -ENOMEM;
 		}
 		list_add(&sgtl->list, &sgt_info->active_sgts->list);
 		break;
@@ -201,6 +214,11 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_KMAP_ATOMIC:
 	case HYPER_DMABUF_OPS_KMAP:
 		va_kmapl = kcalloc(1, sizeof(*va_kmapl), GFP_KERNEL);
+		if (!va_kmapl) {
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KMAP(_ATOMIC)\n");
+			return -ENOMEM;
+		}
 
 		/* dummy kmapping of 1 page */
 		if (ops == HYPER_DMABUF_OPS_KMAP_ATOMIC)
@@ -212,7 +230,7 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 			kfree(va_kmapl);
 			dev_err(hyper_dmabuf_private.device,
 				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_KMAP(_ATOMIC)\n");
-			return PTR_ERR(va_kmapl->vaddr);
+			return -ENOMEM;
 		}
 		list_add(&va_kmapl->list, &sgt_info->va_kmapped->list);
 		break;
@@ -255,6 +273,12 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 	case HYPER_DMABUF_OPS_VMAP:
 		va_vmapl = kcalloc(1, sizeof(*va_vmapl), GFP_KERNEL);
 
+		if (!va_vmapl) {
+			dev_err(hyper_dmabuf_private.device,
+				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VMAP\n");
+			return -ENOMEM;
+		}
+
 		/* dummy vmapping */
 		va_vmapl->vaddr = dma_buf_vmap(sgt_info->dma_buf);
 
@@ -262,7 +286,7 @@ int hyper_dmabuf_remote_sync(int id, int ops)
 			kfree(va_vmapl);
 			dev_err(hyper_dmabuf_private.device,
 				"dmabuf remote sync::error while processing HYPER_DMABUF_OPS_VMAP\n");
-			return PTR_ERR(va_vmapl->vaddr);
+			return -ENOMEM;
 		}
 		list_add(&va_vmapl->list, &sgt_info->va_vmapped->list);
 		break;

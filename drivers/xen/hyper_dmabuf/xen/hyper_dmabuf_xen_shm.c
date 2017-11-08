@@ -96,6 +96,12 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	lvl2_table = (grant_ref_t *)__get_free_pages(GFP_KERNEL, n_lvl2_grefs);
 
 	sh_pages_info = kmalloc(sizeof(*sh_pages_info), GFP_KERNEL);
+
+	if (!sh_pages_info) {
+		dev_err(hyper_dmabuf_private.device, "No more space left\n");
+		return -ENOMEM;
+	}
+
 	*refs_info = (void *)sh_pages_info;
 
 	/* share data pages in rw mode*/

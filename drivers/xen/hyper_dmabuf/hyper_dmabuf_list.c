@@ -34,7 +34,10 @@
 #include <asm/uaccess.h>
 #include <linux/hashtable.h>
 #include <linux/dma-buf.h>
+#include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_list.h"
+
+extern struct hyper_dmabuf_private hyper_dmabuf_private;
 
 DECLARE_HASHTABLE(hyper_dmabuf_hash_imported, MAX_ENTRY_IMPORTED);
 DECLARE_HASHTABLE(hyper_dmabuf_hash_exported, MAX_ENTRY_EXPORTED);
@@ -132,6 +135,12 @@ int hyper_dmabuf_register_exported(struct hyper_dmabuf_sgt_info *info)
 
 	info_entry = kmalloc(sizeof(*info_entry), GFP_KERNEL);
 
+	if (!info_entry) {
+		dev_err(hyper_dmabuf_private.device,
+                        "No memory left to be allocated\n");
+		return -ENOMEM;
+	}
+
 	info_entry->info = info;
 
 	hash_add(hyper_dmabuf_hash_exported, &info_entry->node,
@@ -145,6 +154,12 @@ int hyper_dmabuf_register_imported(struct hyper_dmabuf_imported_sgt_info* info)
 	struct hyper_dmabuf_info_entry_imported *info_entry;
 
 	info_entry = kmalloc(sizeof(*info_entry), GFP_KERNEL);
+
+	if (!info_entry) {
+		dev_err(hyper_dmabuf_private.device,
+                        "No memory left to be allocated\n");
+		return -ENOMEM;
+	}
 
 	info_entry->info = info;
 
