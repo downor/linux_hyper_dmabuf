@@ -32,8 +32,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/dma-buf.h>
-#include <xen/grant_table.h>
-#include <asm/xen/page.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_ops.h"
@@ -45,122 +43,111 @@
 #define WAIT_AFTER_SYNC_REQ 0
 #define REFS_PER_PAGE (PAGE_SIZE/sizeof(grant_ref_t))
 
-extern struct hyper_dmabuf_private hyper_dmabuf_private;
-
-inline int hyper_dmabuf_sync_request(hyper_dmabuf_id_t hid, int dmabuf_ops)
+static int hyper_dmabuf_sync_request(hyper_dmabuf_id_t hid, int dmabuf_ops)
 {
 	struct hyper_dmabuf_req *req;
-	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
-	int operands[5];
+	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	int op[5];
 	int i;
 	int ret;
 
-	operands[0] = hid.id;
+	op[0] = hid.id;
 
 	for (i=0; i<3; i++)
-		operands[i+1] = hid.rng_key[i];
+		op[i+1] = hid.rng_key[i];
 
-	operands[4] = dmabuf_ops;
+	op[4] = dmabuf_ops;
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
 	if (!req) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"No memory left to be allocated\n");
 		return -ENOMEM;
 	}
 
-	hyper_dmabuf_create_request(req, HYPER_DMABUF_OPS_TO_SOURCE, &operands[0]);
+	hyper_dmabuf_create_req(req, HYPER_DMABUF_OPS_TO_SOURCE, &op[0]);
 
 	/* send request and wait for a response */
 	ret = ops->send_req(HYPER_DMABUF_DOM_ID(hid), req, WAIT_AFTER_SYNC_REQ);
+
+	if (ret < 0) {
+		dev_dbg(hy_drv_priv->dev,
+			"dmabuf sync request failed:%d\n", req->op[4]);
+	}
 
 	kfree(req);
 
 	return ret;
 }
 
-static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf, struct device* dev,
-			struct dma_buf_attachment *attach)
+static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf,
+				   struct device* dev,
+				   struct dma_buf_attachment *attach)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!attach->dmabuf->priv)
 		return -EINVAL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)attach->dmabuf->priv;
+	imported = (struct imported_sgt_info *)attach->dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_ATTACH);
 
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-		return ret;
-	}
-
-	return 0;
+	return ret;
 }
 
-static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf, struct dma_buf_attachment *attach)
+static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf,
+				    struct dma_buf_attachment *attach)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!attach->dmabuf->priv)
 		return;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)attach->dmabuf->priv;
+	imported = (struct imported_sgt_info *)attach->dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_DETACH);
-
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 }
 
 static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachment,
-						enum dma_data_direction dir)
+					     enum dma_data_direction dir)
 {
 	struct sg_table *st;
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
-	struct hyper_dmabuf_pages_info *page_info;
+	struct imported_sgt_info *imported;
+	struct pages_info *pg_info;
 	int ret;
 
 	if (!attachment->dmabuf->priv)
 		return NULL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)attachment->dmabuf->priv;
+	imported = (struct imported_sgt_info *)attachment->dmabuf->priv;
 
 	/* extract pages from sgt */
-	page_info = hyper_dmabuf_ext_pgs(sgt_info->sgt);
+	pg_info = hyper_dmabuf_ext_pgs(imported->sgt);
 
-	if (!page_info) {
+	if (!pg_info) {
 		return NULL;
 	}
 
 	/* create a new sg_table with extracted pages */
-	st = hyper_dmabuf_create_sgt(page_info->pages, page_info->frst_ofst,
-				page_info->last_len, page_info->nents);
+	st = hyper_dmabuf_create_sgt(pg_info->pgs, pg_info->frst_ofst,
+				     pg_info->last_len, pg_info->nents);
 	if (!st)
 		goto err_free_sg;
 
         if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir))
                 goto err_free_sg;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_MAP);
 
-	kfree(page_info->pages);
-	kfree(page_info);
-
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
+	kfree(pg_info->pgs);
+	kfree(pg_info);
 
 	return st;
 
@@ -170,8 +157,8 @@ err_free_sg:
 		kfree(st);
 	}
 
-	kfree(page_info->pages);
-	kfree(page_info);
+	kfree(pg_info->pgs);
+	kfree(pg_info);
 
 	return NULL;
 }
@@ -180,294 +167,251 @@ static void hyper_dmabuf_ops_unmap(struct dma_buf_attachment *attachment,
 				   struct sg_table *sg,
 				   enum dma_data_direction dir)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!attachment->dmabuf->priv)
 		return;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)attachment->dmabuf->priv;
+	imported = (struct imported_sgt_info *)attachment->dmabuf->priv;
 
 	dma_unmap_sg(attachment->dev, sg->sgl, sg->nents, dir);
 
 	sg_free_table(sg);
 	kfree(sg);
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_UNMAP);
-
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 }
 
 static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
-	struct hyper_dmabuf_backend_ops *ops = hyper_dmabuf_private.backend_ops;
+	struct imported_sgt_info *imported;
+	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
 	int ret;
-	int final_release;
+	int finish;
 
 	if (!dma_buf->priv)
 		return;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dma_buf->priv;
+	imported = (struct imported_sgt_info *)dma_buf->priv;
 
-	if (!dmabuf_refcount(sgt_info->dma_buf)) {
-		sgt_info->dma_buf = NULL;
+	if (!dmabuf_refcount(imported->dma_buf)) {
+		imported->dma_buf = NULL;
 	}
 
-	sgt_info->num_importers--;
+	imported->importers--;
 
-	if (sgt_info->num_importers == 0) {
-		ops->unmap_shared_pages(&sgt_info->refs_info, sgt_info->nents);
+	if (imported->importers == 0) {
+		ops->unmap_shared_pages(&imported->refs_info, imported->nents);
 
-		if (sgt_info->sgt) {
-			sg_free_table(sgt_info->sgt);
-			kfree(sgt_info->sgt);
-			sgt_info->sgt = NULL;
+		if (imported->sgt) {
+			sg_free_table(imported->sgt);
+			kfree(imported->sgt);
+			imported->sgt = NULL;
 		}
 	}
 
-	final_release = sgt_info && !sgt_info->valid &&
-		        !sgt_info->num_importers;
+	finish = imported && !imported->valid &&
+		 !imported->importers;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_RELEASE);
-	if (ret < 0) {
-		dev_warn(hyper_dmabuf_private.device,
-			 "hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 
 	/*
 	 * Check if buffer is still valid and if not remove it from imported list.
 	 * That has to be done after sending sync request
 	 */
-	if (final_release) {
-		hyper_dmabuf_remove_imported(sgt_info->hid);
-		kfree(sgt_info);
+	if (finish) {
+		hyper_dmabuf_remove_imported(imported->hid);
+		kfree(imported);
 	}
 }
 
 static int hyper_dmabuf_ops_begin_cpu_access(struct dma_buf *dmabuf, enum dma_data_direction dir)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return -EINVAL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 
 	return ret;
 }
 
 static int hyper_dmabuf_ops_end_cpu_access(struct dma_buf *dmabuf, enum dma_data_direction dir)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return -EINVAL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_END_CPU_ACCESS);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 
 	return 0;
 }
 
 static void *hyper_dmabuf_ops_kmap_atomic(struct dma_buf *dmabuf, unsigned long pgnum)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return NULL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_KMAP_ATOMIC);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 
 	return NULL; /* for now NULL.. need to return the address of mapped region */
 }
 
 static void hyper_dmabuf_ops_kunmap_atomic(struct dma_buf *dmabuf, unsigned long pgnum, void *vaddr)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_KUNMAP_ATOMIC);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 }
 
 static void *hyper_dmabuf_ops_kmap(struct dma_buf *dmabuf, unsigned long pgnum)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return NULL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_KMAP);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 
-	return NULL; /* for now NULL.. need to return the address of mapped region */
+	/* for now NULL.. need to return the address of mapped region */
+	return NULL;
 }
 
-static void hyper_dmabuf_ops_kunmap(struct dma_buf *dmabuf, unsigned long pgnum, void *vaddr)
+static void hyper_dmabuf_ops_kunmap(struct dma_buf *dmabuf, unsigned long pgnum,
+				    void *vaddr)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_KUNMAP);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 }
 
 static int hyper_dmabuf_ops_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return -EINVAL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_MMAP);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 
 	return ret;
 }
 
 static void *hyper_dmabuf_ops_vmap(struct dma_buf *dmabuf)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return NULL;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_VMAP);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 
 	return NULL;
 }
 
 static void hyper_dmabuf_ops_vunmap(struct dma_buf *dmabuf, void *vaddr)
 {
-	struct hyper_dmabuf_imported_sgt_info *sgt_info;
+	struct imported_sgt_info *imported;
 	int ret;
 
 	if (!dmabuf->priv)
 		return;
 
-	sgt_info = (struct hyper_dmabuf_imported_sgt_info *)dmabuf->priv;
+	imported = (struct imported_sgt_info *)dmabuf->priv;
 
-	ret = hyper_dmabuf_sync_request(sgt_info->hid,
+	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_VUNMAP);
-	if (ret < 0) {
-		dev_err(hyper_dmabuf_private.device,
-			"hyper_dmabuf::%s Error:send dmabuf sync request failed\n", __func__);
-	}
 }
 
 static const struct dma_buf_ops hyper_dmabuf_ops = {
-		.attach = hyper_dmabuf_ops_attach,
-		.detach = hyper_dmabuf_ops_detach,
-		.map_dma_buf = hyper_dmabuf_ops_map,
-		.unmap_dma_buf = hyper_dmabuf_ops_unmap,
-		.release = hyper_dmabuf_ops_release,
-		.begin_cpu_access = (void*)hyper_dmabuf_ops_begin_cpu_access,
-		.end_cpu_access = (void*)hyper_dmabuf_ops_end_cpu_access,
-		.map_atomic = hyper_dmabuf_ops_kmap_atomic,
-		.unmap_atomic = hyper_dmabuf_ops_kunmap_atomic,
-		.map = hyper_dmabuf_ops_kmap,
-		.unmap = hyper_dmabuf_ops_kunmap,
-		.mmap = hyper_dmabuf_ops_mmap,
-		.vmap = hyper_dmabuf_ops_vmap,
-		.vunmap = hyper_dmabuf_ops_vunmap,
+	.attach = hyper_dmabuf_ops_attach,
+	.detach = hyper_dmabuf_ops_detach,
+	.map_dma_buf = hyper_dmabuf_ops_map,
+	.unmap_dma_buf = hyper_dmabuf_ops_unmap,
+	.release = hyper_dmabuf_ops_release,
+	.begin_cpu_access = (void*)hyper_dmabuf_ops_begin_cpu_access,
+	.end_cpu_access = (void*)hyper_dmabuf_ops_end_cpu_access,
+	.map_atomic = hyper_dmabuf_ops_kmap_atomic,
+	.unmap_atomic = hyper_dmabuf_ops_kunmap_atomic,
+	.map = hyper_dmabuf_ops_kmap,
+	.unmap = hyper_dmabuf_ops_kunmap,
+	.mmap = hyper_dmabuf_ops_mmap,
+	.vmap = hyper_dmabuf_ops_vmap,
+	.vunmap = hyper_dmabuf_ops_vunmap,
 };
 
 /* exporting dmabuf as fd */
-int hyper_dmabuf_export_fd(struct hyper_dmabuf_imported_sgt_info *dinfo, int flags)
+int hyper_dmabuf_export_fd(struct imported_sgt_info *imported, int flags)
 {
 	int fd = -1;
 
 	/* call hyper_dmabuf_export_dmabuf and create
 	 * and bind a handle for it then release
 	 */
-	hyper_dmabuf_export_dma_buf(dinfo);
+	hyper_dmabuf_export_dma_buf(imported);
 
-	if (dinfo->dma_buf) {
-		fd = dma_buf_fd(dinfo->dma_buf, flags);
+	if (imported->dma_buf) {
+		fd = dma_buf_fd(imported->dma_buf, flags);
 	}
 
 	return fd;
 }
 
-void hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_info *dinfo)
+void hyper_dmabuf_export_dma_buf(struct imported_sgt_info *imported)
 {
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
 	exp_info.ops = &hyper_dmabuf_ops;
 
 	/* multiple of PAGE_SIZE, not considering offset */
-	exp_info.size = dinfo->sgt->nents * PAGE_SIZE;
-	exp_info.flags = /* not sure about flag */0;
-	exp_info.priv = dinfo;
+	exp_info.size = imported->sgt->nents * PAGE_SIZE;
+	exp_info.flags = /* not sure about flag */ 0;
+	exp_info.priv = imported;
 
-	dinfo->dma_buf = dma_buf_export(&exp_info);
+	imported->dma_buf = dma_buf_export(&exp_info);
 }

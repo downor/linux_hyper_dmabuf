@@ -38,8 +38,6 @@
 #include "hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_xen_comm_list.h"
 
-extern struct hyper_dmabuf_private hyper_dmabuf_private;
-
 DECLARE_HASHTABLE(xen_comm_tx_ring_hash, MAX_ENTRY_TX_RING);
 DECLARE_HASHTABLE(xen_comm_rx_ring_hash, MAX_ENTRY_RX_RING);
 
@@ -56,7 +54,7 @@ int xen_comm_add_tx_ring(struct xen_comm_tx_ring_info *ring_info)
 	info_entry = kmalloc(sizeof(*info_entry), GFP_KERNEL);
 
 	if (!info_entry) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"No memory left to be allocated\n");
 		return -ENOMEM;
 	}
@@ -76,7 +74,7 @@ int xen_comm_add_rx_ring(struct xen_comm_rx_ring_info *ring_info)
 	info_entry = kmalloc(sizeof(*info_entry), GFP_KERNEL);
 
 	if (!info_entry) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"No memory left to be allocated\n");
 		return -ENOMEM;
 	}

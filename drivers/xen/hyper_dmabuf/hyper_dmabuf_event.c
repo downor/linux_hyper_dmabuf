@@ -32,37 +32,33 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/dma-buf.h>
-#include <xen/grant_table.h>
-#include <asm/xen/page.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_event.h"
 
-extern struct hyper_dmabuf_private hyper_dmabuf_private;
-
 static void hyper_dmabuf_send_event_locked(struct hyper_dmabuf_event *e)
 {
 	struct hyper_dmabuf_event *oldest;
 
-	assert_spin_locked(&hyper_dmabuf_private.event_lock);
+	assert_spin_locked(&hy_drv_priv->event_lock);
 
 	/* check current number of event then if it hits the max num allowed
 	 * then remove the oldest event in the list */
-	if (hyper_dmabuf_private.curr_num_event > MAX_DEPTH_EVENT_QUEUE - 1) {
-		oldest = list_first_entry(&hyper_dmabuf_private.event_list,
+	if (hy_drv_priv->pending > MAX_DEPTH_EVENT_QUEUE - 1) {
+		oldest = list_first_entry(&hy_drv_priv->event_list,
 				struct hyper_dmabuf_event, link);
 		list_del(&oldest->link);
-		hyper_dmabuf_private.curr_num_event--;
+		hy_drv_priv->pending--;
 		kfree(oldest);
 	}
 
 	list_add_tail(&e->link,
-		      &hyper_dmabuf_private.event_list);
+		      &hy_drv_priv->event_list);
 
-	hyper_dmabuf_private.curr_num_event++;
+	hy_drv_priv->pending++;
 
-	wake_up_interruptible(&hyper_dmabuf_private.event_wait);
+	wake_up_interruptible(&hy_drv_priv->event_wait);
 }
 
 void hyper_dmabuf_events_release()
@@ -70,34 +66,34 @@ void hyper_dmabuf_events_release()
 	struct hyper_dmabuf_event *e, *et;
 	unsigned long irqflags;
 
-	spin_lock_irqsave(&hyper_dmabuf_private.event_lock, irqflags);
+	spin_lock_irqsave(&hy_drv_priv->event_lock, irqflags);
 
-	list_for_each_entry_safe(e, et, &hyper_dmabuf_private.event_list,
+	list_for_each_entry_safe(e, et, &hy_drv_priv->event_list,
 				 link) {
 		list_del(&e->link);
 		kfree(e);
-		hyper_dmabuf_private.curr_num_event--;
+		hy_drv_priv->pending--;
 	}
 
-	if (hyper_dmabuf_private.curr_num_event) {
-		dev_err(hyper_dmabuf_private.device,
+	if (hy_drv_priv->pending) {
+		dev_err(hy_drv_priv->dev,
 			"possible leak on event_list\n");
 	}
 
-	spin_unlock_irqrestore(&hyper_dmabuf_private.event_lock, irqflags);
+	spin_unlock_irqrestore(&hy_drv_priv->event_lock, irqflags);
 }
 
 int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 {
 	struct hyper_dmabuf_event *e;
-	struct hyper_dmabuf_imported_sgt_info *imported_sgt_info;
+	struct imported_sgt_info *imported;
 
 	unsigned long irqflags;
 
-	imported_sgt_info = hyper_dmabuf_find_imported(hid);
+	imported = hyper_dmabuf_find_imported(hid);
 
-	if (!imported_sgt_info) {
-		dev_err(hyper_dmabuf_private.device,
+	if (!imported) {
+		dev_err(hy_drv_priv->dev,
 			"can't find imported_sgt_info in the list\n");
 		return -EINVAL;
 	}
@@ -105,29 +101,29 @@ int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 	e = kzalloc(sizeof(*e), GFP_KERNEL);
 
 	if (!e) {
-		dev_err(hyper_dmabuf_private.device,
+		dev_err(hy_drv_priv->dev,
 			"no space left\n");
 		return -ENOMEM;
 	}
 
 	e->event_data.hdr.event_type = HYPER_DMABUF_NEW_IMPORT;
 	e->event_data.hdr.hid = hid;
-	e->event_data.data = (void*)imported_sgt_info->priv;
-	e->event_data.hdr.size = imported_sgt_info->sz_priv;
+	e->event_data.data = (void*)imported->priv;
+	e->event_data.hdr.size = imported->sz_priv;
 
-	spin_lock_irqsave(&hyper_dmabuf_private.event_lock, irqflags);
+	spin_lock_irqsave(&hy_drv_priv->event_lock, irqflags);
 
 	hyper_dmabuf_send_event_locked(e);
 
-	spin_unlock_irqrestore(&hyper_dmabuf_private.event_lock, irqflags);
+	spin_unlock_irqrestore(&hy_drv_priv->event_lock, irqflags);
 
-	dev_dbg(hyper_dmabuf_private.device,
-			"event number = %d :", hyper_dmabuf_private.curr_num_event);
+	dev_dbg(hy_drv_priv->dev,
+		"event number = %d :", hy_drv_priv->pending);
 
-	dev_dbg(hyper_dmabuf_private.device,
-			"generating events for {%d, %d, %d, %d}\n",
-			imported_sgt_info->hid.id, imported_sgt_info->hid.rng_key[0],
-			imported_sgt_info->hid.rng_key[1], imported_sgt_info->hid.rng_key[2]);
+	dev_dbg(hy_drv_priv->dev,
+		"generating events for {%d, %d, %d, %d}\n",
+		imported->hid.id, imported->hid.rng_key[0],
+		imported->hid.rng_key[1], imported->hid.rng_key[2]);
 
 	return 0;
 }

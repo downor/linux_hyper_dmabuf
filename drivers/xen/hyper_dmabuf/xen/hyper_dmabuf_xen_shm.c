@@ -36,8 +36,6 @@
 
 #define REFS_PER_PAGE (PAGE_SIZE/sizeof(grant_ref_t))
 
-extern struct hyper_dmabuf_private hyper_dmabuf_private;
-
 /*
  * Creates 2 level page directory structure for referencing shared pages.
  * Top level page is a single page that contains up to 1024 refids that
@@ -98,7 +96,7 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	sh_pages_info = kmalloc(sizeof(*sh_pages_info), GFP_KERNEL);
 
 	if (!sh_pages_info) {
-		dev_err(hyper_dmabuf_private.device, "No more space left\n");
+		dev_err(hy_drv_priv->dev, "No more space left\n");
 		return -ENOMEM;
 	}
 
@@ -107,10 +105,10 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	/* share data pages in readonly mode for security */
 	for (i=0; i<nents; i++) {
 		lvl2_table[i] = gnttab_grant_foreign_access(domid,
-							    pfn_to_mfn(page_to_pfn(pages[i])),
-							    true /* read-only from remote domain */);
+					pfn_to_mfn(page_to_pfn(pages[i])),
+					true /* read-only from remote domain */);
 		if (lvl2_table[i] == -ENOSPC) {
-			dev_err(hyper_dmabuf_private.device, "No more space left in grant table\n");
+			dev_err(hy_drv_priv->dev, "No more space left in grant table\n");
 
 			/* Unshare all already shared pages for lvl2 */
 			while(i--) {
@@ -124,10 +122,11 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	/* Share 2nd level addressing pages in readonly mode*/
 	for (i=0; i< n_lvl2_grefs; i++) {
 		lvl3_table[i] = gnttab_grant_foreign_access(domid,
-							    virt_to_mfn((unsigned long)lvl2_table+i*PAGE_SIZE ),
-							    true);
+					virt_to_mfn((unsigned long)lvl2_table+i*PAGE_SIZE ),
+					true);
+
 		if (lvl3_table[i] == -ENOSPC) {
-			dev_err(hyper_dmabuf_private.device, "No more space left in grant table\n");
+			dev_err(hy_drv_priv->dev, "No more space left in grant table\n");
 
 			/* Unshare all already shared pages for lvl3 */
 			while(i--) {
@@ -147,11 +146,11 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 
 	/* Share lvl3_table in readonly mode*/
 	lvl3_gref = gnttab_grant_foreign_access(domid,
-						virt_to_mfn((unsigned long)lvl3_table),
-						true);
+			virt_to_mfn((unsigned long)lvl3_table),
+			true);
 
 	if (lvl3_gref == -ENOSPC) {
-		dev_err(hyper_dmabuf_private.device, "No more space left in grant table\n");
+		dev_err(hy_drv_priv->dev, "No more space left in grant table\n");
 
 		/* Unshare all pages for lvl3 */
 		while(i--) {
@@ -178,7 +177,7 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	/* Store exported pages refid to be unshared later */
 	sh_pages_info->lvl3_gref = lvl3_gref;
 
-	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
+	dev_dbg(hy_drv_priv->dev, "%s exit\n", __func__);
 	return lvl3_gref;
 
 err_cleanup:
@@ -190,16 +189,17 @@ err_cleanup:
 
 int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
 	struct xen_shared_pages_info *sh_pages_info;
-	int n_lvl2_grefs = (nents/REFS_PER_PAGE + ((nents % REFS_PER_PAGE) ? 1: 0));
+	int n_lvl2_grefs = (nents/REFS_PER_PAGE +
+			    ((nents % REFS_PER_PAGE) ? 1: 0));
 	int i;
 
-	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
+	dev_dbg(hy_drv_priv->dev, "%s entry\n", __func__);
 	sh_pages_info = (struct xen_shared_pages_info *)(*refs_info);
 
 	if (sh_pages_info->lvl3_table == NULL ||
 	    sh_pages_info->lvl2_table ==  NULL ||
 	    sh_pages_info->lvl3_gref == -1) {
-		dev_warn(hyper_dmabuf_private.device,
+		dev_warn(hy_drv_priv->dev,
 			 "gref table for hyper_dmabuf already cleaned up\n");
 		return 0;
 	}
@@ -207,7 +207,7 @@ int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
 	/* End foreign access for data pages, but do not free them */
 	for (i = 0; i < nents; i++) {
 		if (gnttab_query_foreign_access(sh_pages_info->lvl2_table[i])) {
-			dev_warn(hyper_dmabuf_private.device, "refid not shared !!\n");
+			dev_warn(hy_drv_priv->dev, "refid not shared !!\n");
 		}
 		gnttab_end_foreign_access_ref(sh_pages_info->lvl2_table[i], 0);
 		gnttab_free_grant_reference(sh_pages_info->lvl2_table[i]);
@@ -216,17 +216,17 @@ int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
 	/* End foreign access for 2nd level addressing pages */
 	for (i = 0; i < n_lvl2_grefs; i++) {
 		if (gnttab_query_foreign_access(sh_pages_info->lvl3_table[i])) {
-			dev_warn(hyper_dmabuf_private.device, "refid not shared !!\n");
+			dev_warn(hy_drv_priv->dev, "refid not shared !!\n");
 		}
 		if (!gnttab_end_foreign_access_ref(sh_pages_info->lvl3_table[i], 1)) {
-			dev_warn(hyper_dmabuf_private.device, "refid still in use!!!\n");
+			dev_warn(hy_drv_priv->dev, "refid still in use!!!\n");
 		}
 		gnttab_free_grant_reference(sh_pages_info->lvl3_table[i]);
 	}
 
 	/* End foreign access for top level addressing page */
 	if (gnttab_query_foreign_access(sh_pages_info->lvl3_gref)) {
-		dev_warn(hyper_dmabuf_private.device, "gref not shared !!\n");
+		dev_warn(hy_drv_priv->dev, "gref not shared !!\n");
 	}
 
 	gnttab_end_foreign_access_ref(sh_pages_info->lvl3_gref, 1);
@@ -242,7 +242,7 @@ int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
 	kfree(sh_pages_info);
 	sh_pages_info = NULL;
 
-	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
+	dev_dbg(hy_drv_priv->dev, "%s exit\n", __func__);
 	return 0;
 }
 
@@ -270,27 +270,33 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 
 	/* # of grefs in the last page of lvl2 table */
 	int nents_last = (nents - 1) % REFS_PER_PAGE + 1;
-	int n_lvl2_grefs = (nents / REFS_PER_PAGE) + ((nents_last > 0) ? 1 : 0) -
+	int n_lvl2_grefs = (nents / REFS_PER_PAGE) +
+			   ((nents_last > 0) ? 1 : 0) -
 			   (nents_last == REFS_PER_PAGE);
 	int i, j, k;
 
-	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
+	dev_dbg(hy_drv_priv->dev, "%s entry\n", __func__);
 
 	sh_pages_info = kmalloc(sizeof(*sh_pages_info), GFP_KERNEL);
 	*refs_info = (void *) sh_pages_info;
 
-	lvl2_table_pages = kcalloc(sizeof(struct page*), n_lvl2_grefs, GFP_KERNEL);
+	lvl2_table_pages = kcalloc(sizeof(struct page*), n_lvl2_grefs,
+				   GFP_KERNEL);
+
 	data_pages = kcalloc(sizeof(struct page*), nents, GFP_KERNEL);
 
-	lvl2_map_ops = kcalloc(sizeof(*lvl2_map_ops), n_lvl2_grefs, GFP_KERNEL);
-	lvl2_unmap_ops = kcalloc(sizeof(*lvl2_unmap_ops), n_lvl2_grefs, GFP_KERNEL);
+	lvl2_map_ops = kcalloc(sizeof(*lvl2_map_ops), n_lvl2_grefs,
+			       GFP_KERNEL);
+
+	lvl2_unmap_ops = kcalloc(sizeof(*lvl2_unmap_ops), n_lvl2_grefs,
+				 GFP_KERNEL);
 
 	data_map_ops = kcalloc(sizeof(*data_map_ops), nents, GFP_KERNEL);
 	data_unmap_ops = kcalloc(sizeof(*data_unmap_ops), nents, GFP_KERNEL);
 
 	/* Map top level addressing page */
 	if (gnttab_alloc_pages(1, &lvl3_table_page)) {
-		dev_err(hyper_dmabuf_private.device, "Cannot allocate pages\n");
+		dev_err(hy_drv_priv->dev, "Cannot allocate pages\n");
 		return NULL;
 	}
 
@@ -304,13 +310,16 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 			    GNTMAP_host_map | GNTMAP_readonly, -1);
 
 	if (gnttab_map_refs(&lvl3_map_ops, NULL, &lvl3_table_page, 1)) {
-		dev_err(hyper_dmabuf_private.device, "HYPERVISOR map grant ref failed");
+		dev_err(hy_drv_priv->dev,
+			"HYPERVISOR map grant ref failed");
 		return NULL;
 	}
 
 	if (lvl3_map_ops.status) {
-		dev_err(hyper_dmabuf_private.device, "HYPERVISOR map grant ref failed status = %d",
+		dev_err(hy_drv_priv->dev,
+			"HYPERVISOR map grant ref failed status = %d",
 			lvl3_map_ops.status);
+
 		goto error_cleanup_lvl3;
 	} else {
 		lvl3_unmap_ops.handle = lvl3_map_ops.handle;
@@ -318,35 +327,43 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 
 	/* Map all second level pages */
 	if (gnttab_alloc_pages(n_lvl2_grefs, lvl2_table_pages)) {
-		dev_err(hyper_dmabuf_private.device, "Cannot allocate pages\n");
+		dev_err(hy_drv_priv->dev, "Cannot allocate pages\n");
 		goto error_cleanup_lvl3;
 	}
 
 	for (i = 0; i < n_lvl2_grefs; i++) {
 		lvl2_table = (grant_ref_t *)pfn_to_kaddr(page_to_pfn(lvl2_table_pages[i]));
-		gnttab_set_map_op(&lvl2_map_ops[i], (unsigned long)lvl2_table, GNTMAP_host_map | GNTMAP_readonly,
+		gnttab_set_map_op(&lvl2_map_ops[i],
+				  (unsigned long)lvl2_table, GNTMAP_host_map |
+				  GNTMAP_readonly,
 				  lvl3_table[i], domid);
-		gnttab_set_unmap_op(&lvl2_unmap_ops[i], (unsigned long)lvl2_table, GNTMAP_host_map | GNTMAP_readonly, -1);
+		gnttab_set_unmap_op(&lvl2_unmap_ops[i],
+				    (unsigned long)lvl2_table, GNTMAP_host_map |
+				    GNTMAP_readonly, -1);
 	}
 
 	/* Unmap top level page, as it won't be needed any longer */
-	if (gnttab_unmap_refs(&lvl3_unmap_ops, NULL, &lvl3_table_page, 1)) {
-		dev_err(hyper_dmabuf_private.device, "xen: cannot unmap top level page\n");
+	if (gnttab_unmap_refs(&lvl3_unmap_ops, NULL,
+			      &lvl3_table_page, 1)) {
+		dev_err(hy_drv_priv->dev,
+			"xen: cannot unmap top level page\n");
 		return NULL;
 	} else {
 		/* Mark that page was unmapped */
 		lvl3_unmap_ops.handle = -1;
 	}
 
-	if (gnttab_map_refs(lvl2_map_ops, NULL, lvl2_table_pages, n_lvl2_grefs)) {
-		dev_err(hyper_dmabuf_private.device, "HYPERVISOR map grant ref failed");
+	if (gnttab_map_refs(lvl2_map_ops, NULL,
+			    lvl2_table_pages, n_lvl2_grefs)) {
+		dev_err(hy_drv_priv->dev,
+			"HYPERVISOR map grant ref failed");
 		return NULL;
 	}
 
 	/* Checks if pages were mapped correctly */
 	for (i = 0; i < n_lvl2_grefs; i++) {
 		if (lvl2_map_ops[i].status) {
-			dev_err(hyper_dmabuf_private.device,
+			dev_err(hy_drv_priv->dev,
 				"HYPERVISOR map grant ref failed status = %d",
 				lvl2_map_ops[i].status);
 			goto error_cleanup_lvl2;
@@ -356,7 +373,8 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 	}
 
 	if (gnttab_alloc_pages(nents, data_pages)) {
-		dev_err(hyper_dmabuf_private.device, "Cannot allocate pages\n");
+		dev_err(hy_drv_priv->dev,
+			"Cannot allocate pages\n");
 		goto error_cleanup_lvl2;
 	}
 
@@ -366,13 +384,13 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 		lvl2_table = pfn_to_kaddr(page_to_pfn(lvl2_table_pages[i]));
 		for (j = 0; j < REFS_PER_PAGE; j++) {
 			gnttab_set_map_op(&data_map_ops[k],
-					  (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-					  GNTMAP_host_map | GNTMAP_readonly,
-					  lvl2_table[j], domid);
+				(unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
+				GNTMAP_host_map | GNTMAP_readonly,
+				lvl2_table[j], domid);
 
 			gnttab_set_unmap_op(&data_unmap_ops[k],
-					    (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-					    GNTMAP_host_map | GNTMAP_readonly, -1);
+				(unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
+				GNTMAP_host_map | GNTMAP_readonly, -1);
 			k++;
 		}
 	}
@@ -382,25 +400,29 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 
 	for (j = 0; j < nents_last; j++) {
 		gnttab_set_map_op(&data_map_ops[k],
-				  (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-				  GNTMAP_host_map | GNTMAP_readonly,
-				  lvl2_table[j], domid);
+			(unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
+			GNTMAP_host_map | GNTMAP_readonly,
+			lvl2_table[j], domid);
 
 		gnttab_set_unmap_op(&data_unmap_ops[k],
-				    (unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
-				    GNTMAP_host_map | GNTMAP_readonly, -1);
+			(unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
+			GNTMAP_host_map | GNTMAP_readonly, -1);
 		k++;
 	}
 
-	if (gnttab_map_refs(data_map_ops, NULL, data_pages, nents)) {
-		dev_err(hyper_dmabuf_private.device, "HYPERVISOR map grant ref failed\n");
+	if (gnttab_map_refs(data_map_ops, NULL,
+			    data_pages, nents)) {
+		dev_err(hy_drv_priv->dev,
+			"HYPERVISOR map grant ref failed\n");
 		return NULL;
 	}
 
 	/* unmapping lvl2 table pages */
-	if (gnttab_unmap_refs(lvl2_unmap_ops, NULL, lvl2_table_pages,
+	if (gnttab_unmap_refs(lvl2_unmap_ops,
+			      NULL, lvl2_table_pages,
 			      n_lvl2_grefs)) {
-		dev_err(hyper_dmabuf_private.device, "Cannot unmap 2nd level refs\n");
+		dev_err(hy_drv_priv->dev,
+			"Cannot unmap 2nd level refs\n");
 		return NULL;
 	} else {
 		/* Mark that pages were unmapped */
@@ -411,7 +433,7 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 
 	for (i = 0; i < nents; i++) {
 		if (data_map_ops[i].status) {
-			dev_err(hyper_dmabuf_private.device,
+			dev_err(hy_drv_priv->dev,
 				"HYPERVISOR map grant ref failed status = %d\n",
 				data_map_ops[i].status);
 			goto error_cleanup_data;
@@ -431,7 +453,7 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 	kfree(lvl2_unmap_ops);
 	kfree(data_map_ops);
 
-	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
+	dev_dbg(hy_drv_priv->dev, "%s exit\n", __func__);
 	return data_pages;
 
 error_cleanup_data:
@@ -442,13 +464,14 @@ error_cleanup_data:
 
 error_cleanup_lvl2:
 	if (lvl2_unmap_ops[0].handle != -1)
-		gnttab_unmap_refs(lvl2_unmap_ops, NULL, lvl2_table_pages,
-				  n_lvl2_grefs);
+		gnttab_unmap_refs(lvl2_unmap_ops, NULL,
+				  lvl2_table_pages, n_lvl2_grefs);
 	gnttab_free_pages(n_lvl2_grefs, lvl2_table_pages);
 
 error_cleanup_lvl3:
 	if (lvl3_unmap_ops.handle != -1)
-		gnttab_unmap_refs(&lvl3_unmap_ops, NULL, &lvl3_table_page, 1);
+		gnttab_unmap_refs(&lvl3_unmap_ops, NULL,
+				  &lvl3_table_page, 1);
 	gnttab_free_pages(1, &lvl3_table_page);
 
 	kfree(lvl2_table_pages);
@@ -463,20 +486,20 @@ error_cleanup_lvl3:
 int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents) {
 	struct xen_shared_pages_info *sh_pages_info;
 
-	dev_dbg(hyper_dmabuf_private.device, "%s entry\n", __func__);
+	dev_dbg(hy_drv_priv->dev, "%s entry\n", __func__);
 
 	sh_pages_info = (struct xen_shared_pages_info *)(*refs_info);
 
 	if (sh_pages_info->unmap_ops == NULL ||
 	    sh_pages_info->data_pages == NULL) {
-		dev_warn(hyper_dmabuf_private.device,
-			 "Imported pages already cleaned up or buffer was not imported yet\n");
+		dev_warn(hy_drv_priv->dev,
+			 "pages already cleaned up or buffer not imported yet\n");
 		return 0;
 	}
 
 	if (gnttab_unmap_refs(sh_pages_info->unmap_ops, NULL,
 			      sh_pages_info->data_pages, nents) ) {
-		dev_err(hyper_dmabuf_private.device, "Cannot unmap data pages\n");
+		dev_err(hy_drv_priv->dev, "Cannot unmap data pages\n");
 		return -EFAULT;
 	}
 
@@ -489,6 +512,6 @@ int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents) {
 	kfree(sh_pages_info);
 	sh_pages_info = NULL;
 
-	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
+	dev_dbg(hy_drv_priv->dev, "%s exit\n", __func__);
 	return 0;
 }

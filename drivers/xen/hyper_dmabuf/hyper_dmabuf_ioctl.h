@@ -42,4 +42,6 @@ struct hyper_dmabuf_ioctl_desc {
 			.name = #ioctl			\
 	}
 
+int hyper_dmabuf_unexport_ioctl(struct file *filp, void *data);
+
 #endif //__HYPER_DMABUF_IOCTL_H__

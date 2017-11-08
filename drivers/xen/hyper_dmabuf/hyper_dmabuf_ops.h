@@ -25,8 +25,8 @@
 #ifndef __HYPER_DMABUF_OPS_H__
 #define __HYPER_DMABUF_OPS_H__
 
-int hyper_dmabuf_export_fd(struct hyper_dmabuf_imported_sgt_info *dinfo, int flags);
+int hyper_dmabuf_export_fd(struct imported_sgt_info *imported, int flags);
 
-void hyper_dmabuf_export_dma_buf(struct hyper_dmabuf_imported_sgt_info *dinfo);
+void hyper_dmabuf_export_dma_buf(struct imported_sgt_info *imported);
 
 #endif /* __HYPER_DMABUF_IMP_H__ */

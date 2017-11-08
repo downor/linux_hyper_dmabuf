@@ -28,17 +28,17 @@
 #define MAX_NUMBER_OF_OPERANDS 64
 
 struct hyper_dmabuf_req {
-	unsigned int request_id;
-	unsigned int status;
-	unsigned int command;
-	unsigned int operands[MAX_NUMBER_OF_OPERANDS];
+	unsigned int req_id;
+	unsigned int stat;
+	unsigned int cmd;
+	unsigned int op[MAX_NUMBER_OF_OPERANDS];
 };
 
 struct hyper_dmabuf_resp {
-	unsigned int response_id;
-	unsigned int status;
-	unsigned int command;
-	unsigned int operands[MAX_NUMBER_OF_OPERANDS];
+	unsigned int resp_id;
+	unsigned int stat;
+	unsigned int cmd;
+	unsigned int op[MAX_NUMBER_OF_OPERANDS];
 };
 
 enum hyper_dmabuf_command {
@@ -75,7 +75,7 @@ enum hyper_dmabuf_req_feedback {
 };
 
 /* create a request packet with given command and operands */
-void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
+void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
 				 enum hyper_dmabuf_command command,
 				 int *operands);
 

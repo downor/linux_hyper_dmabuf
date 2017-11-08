@@ -13,9 +13,12 @@ ifneq ($(KERNELRELEASE),)
 				 hyper_dmabuf_id.o \
 				 hyper_dmabuf_remote_sync.o \
 				 hyper_dmabuf_query.o \
-				 hyper_dmabuf_event.o \
 
-ifeq ($(CONFIG_XEN), y)
+ifeq ($(CONFIG_HYPER_DMABUF_EVENT_GEN), y)
+	$(TARGET_MODULE)-objs += hyper_dmabuf_event.o
+endif
+
+ifeq ($(CONFIG_HYPER_DMABUF_XEN), y)
 	$(TARGET_MODULE)-objs += xen/hyper_dmabuf_xen_comm.o \
 				 xen/hyper_dmabuf_xen_comm_list.o \
 				 xen/hyper_dmabuf_xen_shm.o \

@@ -36,7 +36,7 @@ struct hyper_dmabuf_event {
 };
 
 struct hyper_dmabuf_private {
-        struct device *device;
+        struct device *dev;
 
 	/* VM(domain) id of current VM instance */
 	int domid;
@@ -55,7 +55,7 @@ struct hyper_dmabuf_private {
 	struct mutex lock;
 
 	/* flag that shows whether backend is initialized */
-	bool backend_initialized;
+	bool initialized;
 
         wait_queue_head_t event_wait;
         struct list_head event_list;
@@ -63,10 +63,8 @@ struct hyper_dmabuf_private {
 	spinlock_t event_lock;
 	struct mutex event_read_lock;
 
-	int curr_num_event;
-
-	/* indicate whether the driver is unloaded */
-	bool exited;
+	/* # of pending events */
+	int pending;
 };
 
 struct list_reusable_id {
@@ -107,5 +105,8 @@ struct hyper_dmabuf_backend_ops {
 
 	int (*send_req)(int, struct hyper_dmabuf_req *, int);
 };
+
+/* exporting global drv private info */
+extern struct hyper_dmabuf_private *hy_drv_priv;
 
 #endif /* __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__ */
