@@ -257,10 +257,10 @@ reexport:
 	}
 
 	/* driver/application specific private info, max 4x4 bytes */
-	operands[8] = export_remote_attr->private[0];
-	operands[9] = export_remote_attr->private[1];
-	operands[10] = export_remote_attr->private[2];
-	operands[11] = export_remote_attr->private[3];
+	operands[8] = export_remote_attr->priv[0];
+	operands[9] = export_remote_attr->priv[1];
+	operands[10] = export_remote_attr->priv[2];
+	operands[11] = export_remote_attr->priv[3];
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 

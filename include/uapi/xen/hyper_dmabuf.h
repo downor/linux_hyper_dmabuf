@@ -56,7 +56,7 @@ struct ioctl_hyper_dmabuf_export_remote {
 	int remote_domain;
 	/* exported dma buf id */
 	hyper_dmabuf_id_t hid;
-	int private[4];
+	int priv[4];
 };
 
 #define IOCTL_HYPER_DMABUF_EXPORT_FD \
