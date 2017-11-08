@@ -229,9 +229,16 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 
 	ring_info = kmalloc(sizeof(*ring_info), GFP_KERNEL);
 
+	if (!ring_info) {
+		dev_err(hyper_dmabuf_private.device,
+			"No more spae left\n");
+		return -ENOMEM;
+	}
+
 	/* from exporter to importer */
 	shared_ring = (void *)__get_free_pages(GFP_KERNEL, 1);
 	if (shared_ring == 0) {
+		kfree(ring_info);
 		return -ENOMEM;
 	}
 
@@ -246,6 +253,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 							   0);
 	if (ring_info->gref_ring < 0) {
 		/* fail to get gref */
+		kfree(ring_info);
 		return -EFAULT;
 	}
 
@@ -256,6 +264,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	if (ret) {
 		dev_err(hyper_dmabuf_private.device,
 			"Cannot allocate event channel\n");
+		kfree(ring_info);
 		return -EIO;
 	}
 
@@ -271,6 +280,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 		HYPERVISOR_event_channel_op(EVTCHNOP_close, &close);
 		gnttab_end_foreign_access(ring_info->gref_ring, 0,
 					virt_to_mfn(shared_ring));
+		kfree(ring_info);
 		return -EIO;
 	}
 
@@ -299,6 +309,14 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	 */
 	ring_info->watch.callback = remote_dom_exporter_watch_cb;
 	ring_info->watch.node = (const char*) kmalloc(sizeof(char) * 255, GFP_KERNEL);
+
+	if (!ring_info->watch.node) {
+		dev_err(hyper_dmabuf_private.device,
+			"No more space left\n");
+		kfree(ring_info);
+		return -ENOMEM;
+	}
+
 	sprintf((char*)ring_info->watch.node,
 		"/local/domain/%d/data/hyper_dmabuf/%d/port",
 		domid, hyper_dmabuf_xen_get_domid());
@@ -392,8 +410,16 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 
 	map_ops = kmalloc(sizeof(*map_ops), GFP_KERNEL);
 
+	if (!map_ops) {
+		dev_err(hyper_dmabuf_private.device,
+			"No memory left to be allocated\n");
+		ret = -ENOMEM;
+		goto fail_no_map_ops;
+	}
+
 	if (gnttab_alloc_pages(1, &shared_ring)) {
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto fail_others;
 	}
 
 	gnttab_set_map_op(&map_ops[0], (unsigned long)pfn_to_kaddr(page_to_pfn(shared_ring)),
@@ -405,12 +431,14 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	ret = gnttab_map_refs(map_ops, NULL, &shared_ring, 1);
 	if (ret < 0) {
 		dev_err(hyper_dmabuf_private.device, "Cannot map ring\n");
-		return -EFAULT;
+		ret = -EFAULT;
+		goto fail_others;
 	}
 
 	if (map_ops[0].status) {
 		dev_err(hyper_dmabuf_private.device, "Ring mapping failed\n");
-		return -EFAULT;
+		ret = -EFAULT;
+		goto fail_others;
 	} else {
 		ring_info->unmap_op.handle = map_ops[0].handle;
 	}
@@ -424,7 +452,8 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	ret = bind_interdomain_evtchn_to_irq(domid, rx_port);
 
 	if (ret < 0) {
-		return -EIO;
+		ret = -EIO;
+		goto fail_others;
 	}
 
 	ring_info->irq = ret;
@@ -444,6 +473,12 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	ret = request_irq(ring_info->irq,
 			  back_ring_isr, 0,
 			  NULL, (void*)ring_info);
+
+fail_others:
+	kfree(map_ops);
+
+fail_no_map_ops:
+	kfree(ring_info);
 
 	return ret;
 }
@@ -520,14 +555,21 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait)
 		return -ENOENT;
 	}
 
-
 	mutex_lock(&ring_info->lock);
 
 	ring = &ring_info->ring_front;
 
 	while (RING_FULL(ring)) {
+		if (timeout == 0) {
+			dev_err(hyper_dmabuf_private.device,
+				"Timeout while waiting for an entry in the ring\n");
+			return -EIO;
+		}
 		usleep_range(100, 120);
+		timeout--;
 	}
+
+	timeout = 1000;
 
 	new_req = RING_GET_REQUEST(ring, ring->req_prod_pvt);
 	if (!new_req) {

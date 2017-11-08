@@ -89,8 +89,10 @@ struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 		return NULL;
 
 	pinfo->pages = kmalloc(sizeof(struct page *)*hyper_dmabuf_get_num_pgs(sgt), GFP_KERNEL);
-	if (!pinfo->pages)
+	if (!pinfo->pages) {
+		kfree(pinfo);
 		return NULL;
+	}
 
 	sgl = sgt->sgl;
 
