@@ -177,7 +177,7 @@ int hyper_dmabuf_find_id_exported(struct dma_buf *dmabuf, int domid)
 		   info_entry->info->hyper_dmabuf_rdomain == domid)
 			return info_entry->info->hyper_dmabuf_id;
 
-	return -1;
+	return -ENOENT;
 }
 
 struct hyper_dmabuf_imported_sgt_info *hyper_dmabuf_find_imported(int id)
@@ -204,7 +204,7 @@ int hyper_dmabuf_remove_exported(int id)
 			return 0;
 		}
 
-	return -1;
+	return -ENOENT;
 }
 
 int hyper_dmabuf_remove_imported(int id)
@@ -219,5 +219,5 @@ int hyper_dmabuf_remove_imported(int id)
 			return 0;
 		}
 
-	return -1;
+	return -ENOENT;
 }

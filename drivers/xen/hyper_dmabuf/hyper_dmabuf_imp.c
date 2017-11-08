@@ -84,11 +84,11 @@ struct hyper_dmabuf_pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 	struct scatterlist *sgl;
 
 	pinfo = kmalloc(sizeof(*pinfo), GFP_KERNEL);
-	if (pinfo == NULL)
+	if (!pinfo)
 		return NULL;
 
 	pinfo->pages = kmalloc(sizeof(struct page *)*hyper_dmabuf_get_num_pgs(sgt), GFP_KERNEL);
-	if (pinfo->pages == NULL)
+	if (!pinfo->pages)
 		return NULL;
 
 	sgl = sgt->sgl;
@@ -138,7 +138,7 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pages,
 	int i, ret;
 
 	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
-	if (sgt == NULL) {
+	if (!sgt) {
 		return NULL;
 	}
 
@@ -348,7 +348,7 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	/* create a new sg_table with extracted pages */
 	st = hyper_dmabuf_create_sgt(page_info->pages, page_info->frst_ofst,
 				page_info->last_len, page_info->nents);
-	if (st == NULL)
+	if (!st)
 		goto err_free_sg;
 
         if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir)) {

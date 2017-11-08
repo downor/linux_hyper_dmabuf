@@ -388,7 +388,7 @@ int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents) {
 	if (gnttab_unmap_refs(sh_pages_info->unmap_ops, NULL,
 			      sh_pages_info->data_pages, nents) ) {
 		dev_err(hyper_dmabuf_private.device, "Cannot unmap data pages\n");
-		return -EINVAL;
+		return -EFAULT;
 	}
 
 	gnttab_free_pages(nents, sh_pages_info->data_pages);

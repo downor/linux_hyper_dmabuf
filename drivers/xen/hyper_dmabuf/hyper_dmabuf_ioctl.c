@@ -54,7 +54,7 @@ static int hyper_dmabuf_tx_ch_setup(void *data)
 
 	if (!data) {
 		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
-		return -1;
+		return -EINVAL;
 	}
 	tx_ch_attr = (struct ioctl_hyper_dmabuf_tx_ch_setup *)data;
 
@@ -71,7 +71,7 @@ static int hyper_dmabuf_rx_ch_setup(void *data)
 
 	if (!data) {
 		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	rx_ch_attr = (struct ioctl_hyper_dmabuf_rx_ch_setup *)data;
@@ -96,16 +96,16 @@ static int hyper_dmabuf_export_remote(void *data)
 
 	if (!data) {
 		dev_err(hyper_dmabuf_private.device, "user data is NULL\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	export_remote_attr = (struct ioctl_hyper_dmabuf_export_remote *)data;
 
 	dma_buf = dma_buf_get(export_remote_attr->dmabuf_fd);
 
-	if (!dma_buf) {
+	if (IS_ERR(dma_buf)) {
 		dev_err(hyper_dmabuf_private.device,  "Cannot get dma buf\n");
-		return -1;
+		return PTR_ERR(dma_buf);
 	}
 
 	/* we check if this specific attachment was already exported
@@ -114,7 +114,7 @@ static int hyper_dmabuf_export_remote(void *data)
 	 */
 	ret = hyper_dmabuf_find_id_exported(dma_buf, export_remote_attr->remote_domain);
 	sgt_info = hyper_dmabuf_find_exported(ret);
-	if (ret != -1 && sgt_info->valid) {
+	if (ret != -ENOENT && sgt_info->valid) {
 		/*
 		 * Check if unexport is already scheduled for that buffer,
 		 * if so try to cancel it. If that will fail, buffer needs
@@ -134,9 +134,9 @@ static int hyper_dmabuf_export_remote(void *data)
 
 reexport:
 	attachment = dma_buf_attach(dma_buf, hyper_dmabuf_private.device);
-	if (!attachment) {
+	if (IS_ERR(attachment)) {
 		dev_err(hyper_dmabuf_private.device, "Cannot get attachment\n");
-		return -1;
+		return PTR_ERR(attachment);
 	}
 
 	/* Clear ret, as that will cause whole ioctl to return failure
@@ -147,6 +147,11 @@ reexport:
 	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
 
 	sgt_info = kcalloc(1, sizeof(*sgt_info), GFP_KERNEL);
+
+	if(!sgt_info) {
+		dev_err(hyper_dmabuf_private.device, "no more space left\n");
+		return -ENOMEM;
+	}
 
 	sgt_info->hyper_dmabuf_id = hyper_dmabuf_get_id();
 
@@ -174,8 +179,10 @@ reexport:
 	INIT_LIST_HEAD(&sgt_info->va_vmapped->list);
 
 	page_info = hyper_dmabuf_ext_pgs(sgt);
-	if (page_info == NULL)
+	if (!page_info) {
+		dev_err(hyper_dmabuf_private.device, "failed to construct page_info\n");
 		goto fail_export;
+	}
 
 	sgt_info->nents = page_info->nents;
 
@@ -206,8 +213,12 @@ reexport:
 	/* composing a message to the importer */
 	hyper_dmabuf_create_request(req, HYPER_DMABUF_EXPORT, &operands[0]);
 
-	if(ops->send_req(export_remote_attr->remote_domain, req, false))
+	ret = ops->send_req(export_remote_attr->remote_domain, req, false);
+
+	if(ret) {
+		dev_err(hyper_dmabuf_private.device, "error while communicating\n");
 		goto fail_send_request;
+	}
 
 	/* free msg */
 	kfree(req);
@@ -233,7 +244,7 @@ fail_export:
 	kfree(sgt_info->va_kmapped);
 	kfree(sgt_info->va_vmapped);
 
-	return -EINVAL;
+	return ret;
 }
 
 static int hyper_dmabuf_export_fd_ioctl(void *data)
@@ -257,8 +268,12 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 
 	/* look for dmabuf for the id */
 	sgt_info = hyper_dmabuf_find_imported(export_fd_attr->hyper_dmabuf_id);
-	if (sgt_info == NULL || !sgt_info->valid) /* can't find sgt from the table */
-		return -1;
+
+	/* can't find sgt from the table */
+	if (!sgt_info) {
+		dev_err(hyper_dmabuf_private.device, "can't find the entry\n");
+		return -ENOENT;
+	}
 
 	mutex_lock(&hyper_dmabuf_private.lock);
 
@@ -277,7 +292,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 		dev_err(hyper_dmabuf_private.device, "Failed to create sgt or notify exporter\n");
 		sgt_info->num_importers--;
 		mutex_unlock(&hyper_dmabuf_private.lock);
-		return -EINVAL;
+		return ret;
 	}
 	kfree(req);
 
@@ -286,9 +301,10 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 			"Buffer invalid\n");
 		sgt_info->num_importers--;
 		mutex_unlock(&hyper_dmabuf_private.lock);
-		return -1;
+		return -EINVAL;
 	} else {
 		dev_dbg(hyper_dmabuf_private.device, "Can import buffer\n");
+		ret = 0;
 	}
 
 	dev_dbg(hyper_dmabuf_private.device,
@@ -325,7 +341,7 @@ static int hyper_dmabuf_export_fd_ioctl(void *data)
 
 	mutex_unlock(&hyper_dmabuf_private.lock);
 	dev_dbg(hyper_dmabuf_private.device, "%s exit\n", __func__);
-	return 0;
+	return ret;
 }
 
 /* unexport dmabuf from the database and send int req to the source domain
@@ -405,8 +421,8 @@ static int hyper_dmabuf_unexport(void *data)
 
 	/* failed to find corresponding entry in export list */
 	if (sgt_info == NULL) {
-		unexport_attr->status = -EINVAL;
-		return -EFAULT;
+		unexport_attr->status = -ENOENT;
+		return -ENOENT;
 	}
 
 	if (sgt_info->unexport_scheduled)
@@ -441,7 +457,7 @@ static int hyper_dmabuf_query(void *data)
 	/* if dmabuf can't be found in both lists, return */
 	if (!(sgt_info && imported_sgt_info)) {
 		dev_err(hyper_dmabuf_private.device, "can't find entry anywhere\n");
-		return -EINVAL;
+		return -ENOENT;
 	}
 
 	/* not considering the case where a dmabuf is found on both queues
@@ -507,7 +523,7 @@ static long hyper_dmabuf_ioctl(struct file *filp,
 {
 	const struct hyper_dmabuf_ioctl_desc *ioctl = NULL;
 	unsigned int nr = _IOC_NR(cmd);
-	int ret = -EINVAL;
+	int ret;
 	hyper_dmabuf_ioctl_t func;
 	char *kdata;
 
@@ -565,13 +581,13 @@ static const char device_name[] = "hyper_dmabuf";
 /*===============================================================================================*/
 int register_device(void)
 {
-	int result = 0;
+	int ret = 0;
 
-	result = misc_register(&hyper_dmabuf_miscdev);
+	ret = misc_register(&hyper_dmabuf_miscdev);
 
-	if (result != 0) {
+	if (ret) {
 		printk(KERN_WARNING "hyper_dmabuf: driver can't be registered\n");
-		return result;
+		return ret;
 	}
 
 	hyper_dmabuf_private.device = hyper_dmabuf_miscdev.this_device;
@@ -589,7 +605,7 @@ int register_device(void)
 
 	info.irq = err;
 */
-	return result;
+	return ret;
 }
 
 /*-----------------------------------------------------------------------------------------------*/

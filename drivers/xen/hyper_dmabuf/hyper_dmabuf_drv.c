@@ -60,7 +60,7 @@ static int __init hyper_dmabuf_drv_init(void)
 
 	ret = register_device();
 	if (ret < 0) {
-		return -EINVAL;
+		return ret;
 	}
 
 #ifdef CONFIG_HYPER_DMABUF_XEN
@@ -77,18 +77,24 @@ static int __init hyper_dmabuf_drv_init(void)
 
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {
-		return -EINVAL;
+		dev_err(hyper_dmabuf_private.device,
+			"failed to initialize table for exported/imported entries\n");
+		return ret;
 	}
 
 	ret = hyper_dmabuf_private.backend_ops->init_comm_env();
 	if (ret < 0) {
-		return -EINVAL;
+		dev_err(hyper_dmabuf_private.device,
+			"failed to initiailize hypervisor-specific comm env\n");
+		return ret;
 	}
 
 #ifdef CONFIG_HYPER_DMABUF_SYSFS
 	ret = hyper_dmabuf_register_sysfs(hyper_dmabuf_private.device);
 	if (ret < 0) {
-		return -EINVAL;
+		dev_err(hyper_dmabuf_private.device,
+			"failed to initialize sysfs\n");
+		return ret;
 	}
 #endif
 

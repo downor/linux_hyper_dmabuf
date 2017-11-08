@@ -100,7 +100,7 @@ void hyper_dmabuf_create_request(struct hyper_dmabuf_req *req,
 		 * operands0 : hyper_dmabuf_id
 		 * operands1 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
 		 */
-		for (i=0; i<2; i++)
+		for (i = 0; i < 2; i++)
 			req->operands[i] = operands[i];
 		break;
 
@@ -199,6 +199,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		 */
 		dev_dbg(hyper_dmabuf_private.device,
 			"%s: processing HYPER_DMABUF_NOTIFY_UNEXPORT\n", __func__);
+
 		sgt_info = hyper_dmabuf_find_imported(req->operands[0]);
 
 		if (sgt_info) {
@@ -232,6 +233,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		 */
 		dev_dbg(hyper_dmabuf_private.device,
 			"%s: HYPER_DMABUF_OPS_TO_SOURCE\n", __func__);
+
 		ret = hyper_dmabuf_remote_sync(req->operands[0], req->operands[1]);
 		if (ret)
 			req->status = HYPER_DMABUF_REQ_ERROR;
@@ -271,7 +273,6 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	memcpy(temp_req, req, sizeof(*temp_req));
 
 	proc = kcalloc(1, sizeof(struct cmd_process), GFP_KERNEL);
-
 	proc->rq = temp_req;
 	proc->domid = domid;
 
