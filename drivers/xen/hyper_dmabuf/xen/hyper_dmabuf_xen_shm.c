@@ -26,8 +26,6 @@
  *
  */
 
-#include <linux/kernel.h>
-#include <linux/errno.h>
 #include <linux/slab.h>
 #include <xen/grant_table.h>
 #include <asm/xen/page.h>
@@ -75,8 +73,8 @@
  *
  * Returns refid of top level page.
  */
-int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
-				 void **refs_info)
+int xen_be_share_pages(struct page **pages, int domid, int nents,
+		       void **refs_info)
 {
 	grant_ref_t lvl3_gref;
 	grant_ref_t *lvl2_table;
@@ -191,7 +189,7 @@ err_cleanup:
 	return -ENOSPC;
 }
 
-int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents)
+int xen_be_unshare_pages(void **refs_info, int nents)
 {
 	struct xen_shared_pages_info *sh_pages_info;
 	int n_lvl2_grefs = (nents/REFS_PER_PAGE +
@@ -254,8 +252,8 @@ int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents)
 /* Maps provided top level ref id and then return array of pages
  * containing data refs.
  */
-struct page **hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid,
-						int nents, void **refs_info)
+struct page **xen_be_map_shared_pages(int lvl3_gref, int domid,
+				   int nents, void **refs_info)
 {
 	struct page *lvl3_table_page;
 	struct page **lvl2_table_pages;
@@ -492,7 +490,7 @@ error_cleanup_lvl3:
 	return NULL;
 }
 
-int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents)
+int xen_be_unmap_shared_pages(void **refs_info, int nents)
 {
 	struct xen_shared_pages_info *sh_pages_info;
 

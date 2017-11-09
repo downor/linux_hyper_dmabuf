@@ -28,13 +28,9 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/miscdevice.h>
 #include <linux/uaccess.h>
 #include <linux/dma-buf.h>
-#include <linux/delay.h>
-#include <linux/list.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_struct.h"
@@ -80,8 +76,8 @@ static int hyper_dmabuf_rx_ch_setup_ioctl(struct file *filp, void *data)
 	return ret;
 }
 
-static int hyper_dmabuf_send_export_msg(struct exported_sgt_info *exported,
-					struct pages_info *pg_info)
+static int send_export_msg(struct exported_sgt_info *exported,
+			   struct pages_info *pg_info)
 {
 	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
 	struct hyper_dmabuf_req *req;
@@ -102,7 +98,7 @@ static int hyper_dmabuf_send_export_msg(struct exported_sgt_info *exported,
 					 pg_info->nents, &exported->refs_info);
 		if (op[7] < 0) {
 			dev_err(hy_drv_priv->dev, "pages sharing failed\n");
-			return -1;
+			return op[7];
 		}
 	}
 
@@ -114,7 +110,7 @@ static int hyper_dmabuf_send_export_msg(struct exported_sgt_info *exported,
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
 	if (!req)
-		return -1;
+		return -ENOMEM;
 
 	/* composing a message to the importer */
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT, &op[0]);
@@ -212,7 +208,7 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 			ret = -EINVAL;
 		} else {
 			/* send an export msg for updating priv in importer */
-			ret = hyper_dmabuf_send_export_msg(exported, NULL);
+			ret = send_export_msg(exported, NULL);
 
 			if (ret < 0) {
 				dev_err(hy_drv_priv->dev,
@@ -347,7 +343,7 @@ reexport:
 
 	export_remote_attr->hid = exported->hid;
 
-	ret = hyper_dmabuf_send_export_msg(exported, pg_info);
+	ret = send_export_msg(exported, pg_info);
 
 	if (ret < 0) {
 		dev_err(hy_drv_priv->dev,
@@ -550,7 +546,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 /* unexport dmabuf from the database and send int req to the source domain
  * to unmap it.
  */
-static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
+static void delayed_unexport(struct work_struct *work)
 {
 	struct hyper_dmabuf_req *req;
 	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
@@ -612,7 +608,7 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 		hyper_dmabuf_remove_exported(exported->hid);
 
 		/* register hyper_dmabuf_id to the list for reuse */
-		store_reusable_hid(exported->hid);
+		hyper_dmabuf_store_hid(exported->hid);
 
 		if (exported->sz_priv > 0 && !exported->priv)
 			kfree(exported->priv);
@@ -649,8 +645,7 @@ int hyper_dmabuf_unexport_ioctl(struct file *filp, void *data)
 		return 0;
 
 	exported->unexport_sched = true;
-	INIT_DELAYED_WORK(&exported->unexport,
-			  hyper_dmabuf_delayed_unexport);
+	INIT_DELAYED_WORK(&exported->unexport, delayed_unexport);
 	schedule_delayed_work(&exported->unexport,
 			      msecs_to_jiffies(unexport_attr->delay_ms));
 

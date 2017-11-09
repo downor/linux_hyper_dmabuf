@@ -28,12 +28,10 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/dma-buf.h>
 #include <linux/workqueue.h>
-#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_drv.h"
+#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_remote_sync.h"
 #include "hyper_dmabuf_event.h"
 #include "hyper_dmabuf_list.h"

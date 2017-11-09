@@ -31,9 +31,8 @@
 #include <linux/random.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_id.h"
-#include "hyper_dmabuf_msg.h"
 
-void store_reusable_hid(hyper_dmabuf_id_t hid)
+void hyper_dmabuf_store_hid(hyper_dmabuf_id_t hid)
 {
 	struct list_reusable_id *reusable_head = hy_drv_priv->id_queue;
 	struct list_reusable_id *new_reusable;
@@ -48,7 +47,7 @@ void store_reusable_hid(hyper_dmabuf_id_t hid)
 	list_add(&new_reusable->list, &reusable_head->list);
 }
 
-static hyper_dmabuf_id_t retrieve_reusable_hid(void)
+static hyper_dmabuf_id_t get_reusable_hid(void)
 {
 	struct list_reusable_id *reusable_head = hy_drv_priv->id_queue;
 	hyper_dmabuf_id_t hid = {-1, {0, 0, 0} };
@@ -67,7 +66,7 @@ static hyper_dmabuf_id_t retrieve_reusable_hid(void)
 	return hid;
 }
 
-void destroy_reusable_list(void)
+void hyper_dmabuf_free_hid_list(void)
 {
 	struct list_reusable_id *reusable_head = hy_drv_priv->id_queue;
 	struct list_reusable_id *temp_head;
@@ -106,7 +105,7 @@ hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 		hy_drv_priv->id_queue = reusable_head;
 	}
 
-	hid = retrieve_reusable_hid();
+	hid = get_reusable_hid();
 
 	/*creating a new H-ID only if nothing in the reusable id queue
 	 * and count is less than maximum allowed
