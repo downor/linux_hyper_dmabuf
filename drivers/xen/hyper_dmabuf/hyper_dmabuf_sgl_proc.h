@@ -31,7 +31,7 @@ int dmabuf_refcount(struct dma_buf *dma_buf);
 struct pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt);
 
 /* create sg_table with given pages and other parameters */
-struct sg_table* hyper_dmabuf_create_sgt(struct page **pgs,
+struct sg_table *hyper_dmabuf_create_sgt(struct page **pgs,
 					 int frst_ofst, int last_len,
 					 int nents);
 

@@ -76,11 +76,8 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 	case HYPER_DMABUF_OPS_ATTACH:
 		attachl = kcalloc(1, sizeof(*attachl), GFP_KERNEL);
 
-		if (!attachl) {
-			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_ATTACH\n");
+		if (!attachl)
 			return -ENOMEM;
-		}
 
 		attachl->attach = dma_buf_attach(exported->dma_buf,
 						 hy_drv_priv->dev);
@@ -126,13 +123,11 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 
 		sgtl = kcalloc(1, sizeof(*sgtl), GFP_KERNEL);
 
-		if (!sgtl) {
-			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_MAP\n");
+		if (!sgtl)
 			return -ENOMEM;
-		}
 
-		sgtl->sgt = dma_buf_map_attachment(attachl->attach, DMA_BIDIRECTIONAL);
+		sgtl->sgt = dma_buf_map_attachment(attachl->attach,
+						   DMA_BIDIRECTIONAL);
 		if (!sgtl->sgt) {
 			kfree(sgtl);
 			dev_err(hy_drv_priv->dev,
@@ -148,7 +143,7 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 			dev_err(hy_drv_priv->dev,
 				"remote sync::HYPER_DMABUF_OPS_UNMAP\n");
 			dev_err(hy_drv_priv->dev,
-				"no more SGT or attachment left to be unmapped\n");
+				"no SGT or attach left to be unmapped\n");
 			return -EFAULT;
 		}
 
@@ -165,23 +160,28 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 
 	case HYPER_DMABUF_OPS_RELEASE:
 		dev_dbg(hy_drv_priv->dev,
-			"Buffer {id:%d key:%d %d %d} released, references left: %d\n",
-			 exported->hid.id, exported->hid.rng_key[0], exported->hid.rng_key[1],
-			 exported->hid.rng_key[2], exported->active - 1);
+			"id:%d key:%d %d %d} released, ref left: %d\n",
+			 exported->hid.id, exported->hid.rng_key[0],
+			 exported->hid.rng_key[1], exported->hid.rng_key[2],
+			 exported->active - 1);
 
-                exported->active--;
-		/* If there are still importers just break, if no then continue with final cleanup */
+		exported->active--;
+
+		/* If there are still importers just break, if no then
+		 * continue with final cleanup
+		 */
 		if (exported->active)
 			break;
 
-		/*
-		 * Importer just released buffer fd, check if there is any other importer still using it.
-		 * If not and buffer was unexported, clean up shared data and remove that buffer.
+		/* Importer just released buffer fd, check if there is
+		 * any other importer still using it.
+		 * If not and buffer was unexported, clean up shared
+		 * data and remove that buffer.
 		 */
 		dev_dbg(hy_drv_priv->dev,
 			"Buffer {id:%d key:%d %d %d} final released\n",
-			exported->hid.id, exported->hid.rng_key[0], exported->hid.rng_key[1],
-			exported->hid.rng_key[2]);
+			exported->hid.id, exported->hid.rng_key[0],
+			exported->hid.rng_key[1], exported->hid.rng_key[2]);
 
 		if (!exported->valid && !exported->active &&
 		    !exported->unexport_sched) {
@@ -195,19 +195,21 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 		break;
 
 	case HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS:
-		ret = dma_buf_begin_cpu_access(exported->dma_buf, DMA_BIDIRECTIONAL);
+		ret = dma_buf_begin_cpu_access(exported->dma_buf,
+					       DMA_BIDIRECTIONAL);
 		if (ret) {
 			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS\n");
+				"HYPER_DMABUF_OPS_BEGIN_CPU_ACCESS\n");
 			return ret;
 		}
 		break;
 
 	case HYPER_DMABUF_OPS_END_CPU_ACCESS:
-		ret = dma_buf_end_cpu_access(exported->dma_buf, DMA_BIDIRECTIONAL);
+		ret = dma_buf_end_cpu_access(exported->dma_buf,
+					     DMA_BIDIRECTIONAL);
 		if (ret) {
 			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_END_CPU_ACCESS\n");
+				"HYPER_DMABUF_OPS_END_CPU_ACCESS\n");
 			return ret;
 		}
 		break;
@@ -215,22 +217,21 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 	case HYPER_DMABUF_OPS_KMAP_ATOMIC:
 	case HYPER_DMABUF_OPS_KMAP:
 		va_kmapl = kcalloc(1, sizeof(*va_kmapl), GFP_KERNEL);
-		if (!va_kmapl) {
-			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_KMAP(_ATOMIC)\n");
+		if (!va_kmapl)
 			return -ENOMEM;
-		}
 
 		/* dummy kmapping of 1 page */
 		if (ops == HYPER_DMABUF_OPS_KMAP_ATOMIC)
-			va_kmapl->vaddr = dma_buf_kmap_atomic(exported->dma_buf, 1);
+			va_kmapl->vaddr = dma_buf_kmap_atomic(
+						exported->dma_buf, 1);
 		else
-			va_kmapl->vaddr = dma_buf_kmap(exported->dma_buf, 1);
+			va_kmapl->vaddr = dma_buf_kmap(
+						exported->dma_buf, 1);
 
 		if (!va_kmapl->vaddr) {
 			kfree(va_kmapl);
 			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_KMAP(_ATOMIC)\n");
+				"HYPER_DMABUF_OPS_KMAP(_ATOMIC)\n");
 			return -ENOMEM;
 		}
 		list_add(&va_kmapl->list, &exported->va_kmapped->list);
@@ -240,7 +241,7 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 	case HYPER_DMABUF_OPS_KUNMAP:
 		if (list_empty(&exported->va_kmapped->list)) {
 			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
+				"HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
 			dev_err(hy_drv_priv->dev,
 				"no more dmabuf VA to be freed\n");
 			return -EFAULT;
@@ -250,15 +251,17 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 					    struct kmap_vaddr_list, list);
 		if (!va_kmapl->vaddr) {
 			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
+				"HYPER_DMABUF_OPS_KUNMAP(_ATOMIC)\n");
 			return PTR_ERR(va_kmapl->vaddr);
 		}
 
 		/* unmapping 1 page */
 		if (ops == HYPER_DMABUF_OPS_KUNMAP_ATOMIC)
-			dma_buf_kunmap_atomic(exported->dma_buf, 1, va_kmapl->vaddr);
+			dma_buf_kunmap_atomic(exported->dma_buf,
+					      1, va_kmapl->vaddr);
 		else
-			dma_buf_kunmap(exported->dma_buf, 1, va_kmapl->vaddr);
+			dma_buf_kunmap(exported->dma_buf,
+				       1, va_kmapl->vaddr);
 
 		list_del(&va_kmapl->list);
 		kfree(va_kmapl);
@@ -266,7 +269,8 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 
 	case HYPER_DMABUF_OPS_MMAP:
 		/* currently not supported: looking for a way to create
-		 * a dummy vma */
+		 * a dummy vma
+		 */
 		dev_warn(hy_drv_priv->dev,
 			 "remote sync::sychronized mmap is not supported\n");
 		break;
@@ -274,11 +278,8 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 	case HYPER_DMABUF_OPS_VMAP:
 		va_vmapl = kcalloc(1, sizeof(*va_vmapl), GFP_KERNEL);
 
-		if (!va_vmapl) {
-			dev_err(hy_drv_priv->dev,
-				"remote sync::HYPER_DMABUF_OPS_VMAP\n");
+		if (!va_vmapl)
 			return -ENOMEM;
-		}
 
 		/* dummy vmapping */
 		va_vmapl->vaddr = dma_buf_vmap(exported->dma_buf);

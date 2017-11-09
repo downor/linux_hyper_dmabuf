@@ -51,67 +51,91 @@ struct vmap_vaddr_list {
 
 /* Exporter builds pages_info before sharing pages */
 struct pages_info {
-        int frst_ofst; /* offset of data in the first page */
-        int last_len; /* length of data in the last page */
-        int nents; /* # of pages */
-        struct page **pgs; /* pages that contains reference numbers of shared pages*/
+	int frst_ofst;
+	int last_len;
+	int nents;
+	struct page **pgs;
 };
 
 
 /* Exporter stores references to sgt in a hash table
- * Exporter keeps these references for synchronization and tracking purposes
+ * Exporter keeps these references for synchronization
+ * and tracking purposes
  */
 struct exported_sgt_info {
-        hyper_dmabuf_id_t hid; /* unique id to reference dmabuf in remote domain */
-	int rdomid; /* domain importing this sgt */
+	hyper_dmabuf_id_t hid;
 
-	struct dma_buf *dma_buf; /* needed to store this for freeing it later */
+	/* VM ID of importer */
+	int rdomid;
+
+	struct dma_buf *dma_buf;
 	int nents;
 
-	/* list of remote activities on dma_buf */
+	/* list for tracking activities on dma_buf */
 	struct sgt_list *active_sgts;
 	struct attachment_list *active_attached;
 	struct kmap_vaddr_list *va_kmapped;
 	struct vmap_vaddr_list *va_vmapped;
 
-	bool valid; /* set to 0 once unexported. Needed to prevent further mapping by importer */
-	int active; /* locally shared on importer's side */
-	void *refs_info; /* hypervisor-specific info for the references */
+	/* set to 0 when unexported. Importer doesn't
+	 * do a new mapping of buffer if valid == false
+	 */
+	bool valid;
+
+	/* active == true if the buffer is actively used
+	 * (mapped) by importer
+	 */
+	int active;
+
+	/* hypervisor specific reference data for shared pages */
+	void *refs_info;
+
 	struct delayed_work unexport;
 	bool unexport_sched;
 
-	/* owner of buffer
-	 * TODO: that is naiive as buffer may be reused by
-	 * another userspace app, so here list of struct file should be kept
-	 * and emergency unexport should be executed only after last of buffer
-	 * uses releases hyper_dmabuf device
+	/* list for file pointers associated with all user space
+	 * application that have exported this same buffer to
+	 * another VM. This needs to be tracked to know whether
+	 * the buffer can be completely freed.
 	 */
 	struct file *filp;
 
+	/* size of private */
 	size_t sz_priv;
-	char *priv; /* device specific info (e.g. image's meta info?) */
+
+	/* private data associated with the exported buffer */
+	char *priv;
 };
 
-/* Importer store references (before mapping) on shared pages
- * Importer store these references in the table and map it in
- * its own memory map once userspace asks for reference for the buffer */
+/* imported_sgt_info contains information about imported DMA_BUF
+ * this info is kept in IMPORT list and asynchorously retrieved and
+ * used to map DMA_BUF on importer VM's side upon export fd ioctl
+ * request from user-space
+ */
+
 struct imported_sgt_info {
 	hyper_dmabuf_id_t hid; /* unique id for shared dmabuf imported */
 
-	int ref_handle; /* reference number of top level addressing page of shared pages */
-	int frst_ofst;	/* start offset in first shared page */
-	int last_len;	/* length of data in the last shared page */
-	int nents;	/* number of pages to be shared */
+	/* hypervisor-specific handle to pages */
+	int ref_handle;
+
+	/* offset and size info of DMA_BUF */
+	int frst_ofst;
+	int last_len;
+	int nents;
 
 	struct dma_buf *dma_buf;
-	struct sg_table *sgt; /* sgt pointer after importing buffer */
+	struct sg_table *sgt;
 
 	void *refs_info;
 	bool valid;
 	int importers;
 
+	/* size of private */
 	size_t sz_priv;
-	char *priv; /* device specific info (e.g. image's meta info?) */
+
+	/* private data associated with the exported buffer */
+	char *priv;
 };
 
 #endif /* __HYPER_DMABUF_STRUCT_H__ */

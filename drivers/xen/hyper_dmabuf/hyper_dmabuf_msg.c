@@ -52,18 +52,19 @@ void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
 	req->stat = HYPER_DMABUF_REQ_NOT_RESPONDED;
 	req->cmd = cmd;
 
-	switch(cmd) {
+	switch (cmd) {
 	/* as exporter, commands to importer */
 	case HYPER_DMABUF_EXPORT:
 		/* exporting pages for dmabuf */
 		/* command : HYPER_DMABUF_EXPORT,
-		 * op0~3 : hyper_dmabuf_id
+		 * op0~op3 : hyper_dmabuf_id
 		 * op4 : number of pages to be shared
 		 * op5 : offset of data in the first page
 		 * op6 : length of data in the last page
 		 * op7 : top-level reference number for shared pages
 		 * op8 : size of private data (from op9)
-		 * op9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * op9 ~ : Driver-specific private data
+		 *	   (e.g. graphic buffer's meta info)
 		 */
 
 		memcpy(&req->op[0], &op[0], 9 * sizeof(int) + op[8]);
@@ -72,34 +73,39 @@ void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
 	case HYPER_DMABUF_NOTIFY_UNEXPORT:
 		/* destroy sg_list for hyper_dmabuf_id on remote side */
 		/* command : DMABUF_DESTROY,
-		 * op0~3 : hyper_dmabuf_id_t hid
+		 * op0~op3 : hyper_dmabuf_id_t hid
 		 */
 
-		for (i=0; i < 4; i++)
+		for (i = 0; i < 4; i++)
 			req->op[i] = op[i];
 		break;
 
 	case HYPER_DMABUF_EXPORT_FD:
 	case HYPER_DMABUF_EXPORT_FD_FAILED:
-		/* dmabuf fd is being created on imported side or importing failed */
-		/* command : HYPER_DMABUF_EXPORT_FD or HYPER_DMABUF_EXPORT_FD_FAILED,
-		 * op0~3 : hyper_dmabuf_id
+		/* dmabuf fd is being created on imported side or importing
+		 * failed
+		 *
+		 * command : HYPER_DMABUF_EXPORT_FD or
+		 *	     HYPER_DMABUF_EXPORT_FD_FAILED,
+		 * op0~op3 : hyper_dmabuf_id
 		 */
 
-		for (i=0; i < 4; i++)
+		for (i = 0; i < 4; i++)
 			req->op[i] = op[i];
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
-		/* notifying dmabuf map/unmap to importer (probably not needed) */
-		/* for dmabuf synchronization */
+		/* notifying dmabuf map/unmap to importer (probably not needed)
+		 * for dmabuf synchronization
+		 */
 		break;
 
-	/* as importer, command to exporter */
 	case HYPER_DMABUF_OPS_TO_SOURCE:
-		/* notifying dmabuf map/unmap to exporter, map will make the driver to do shadow mapping
-		* or unmapping for synchronization with original exporter (e.g. i915) */
-		/* command : DMABUF_OPS_TO_SOURCE.
+		/* notifying dmabuf map/unmap to exporter, map will make
+		 * the driver to do shadow mapping or unmapping for
+		 * synchronization with original exporter (e.g. i915)
+		 *
+		 * command : DMABUF_OPS_TO_SOURCE.
 		 * op0~3 : hyper_dmabuf_id
 		 * op4 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
 		 */
@@ -116,7 +122,8 @@ void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
 static void cmd_process_work(struct work_struct *work)
 {
 	struct imported_sgt_info *imported;
-	struct cmd_process *proc = container_of(work, struct cmd_process, work);
+	struct cmd_process *proc = container_of(work,
+						struct cmd_process, work);
 	struct hyper_dmabuf_req *req;
 	int domid;
 	int i;
@@ -128,40 +135,42 @@ static void cmd_process_work(struct work_struct *work)
 	case HYPER_DMABUF_EXPORT:
 		/* exporting pages for dmabuf */
 		/* command : HYPER_DMABUF_EXPORT,
-		 * op0~3 : hyper_dmabuf_id
+		 * op0~op3 : hyper_dmabuf_id
 		 * op4 : number of pages to be shared
 		 * op5 : offset of data in the first page
 		 * op6 : length of data in the last page
 		 * op7 : top-level reference number for shared pages
 		 * op8 : size of private data (from op9)
-		 * op9 ~ : Driver-specific private data (e.g. graphic buffer's meta info)
+		 * op9 ~ : Driver-specific private data
+		 *         (e.g. graphic buffer's meta info)
 		 */
 
-		/* if nents == 0, it means it is a message only for priv synchronization
-		 * for existing imported_sgt_info so not creating a new one */
+		/* if nents == 0, it means it is a message only for
+		 * priv synchronization. for existing imported_sgt_info
+		 * so not creating a new one
+		 */
 		if (req->op[4] == 0) {
 			hyper_dmabuf_id_t exist = {req->op[0],
 						   {req->op[1], req->op[2],
-						   req->op[3]}};
+						   req->op[3] } };
 
 			imported = hyper_dmabuf_find_imported(exist);
 
 			if (!imported) {
 				dev_err(hy_drv_priv->dev,
-					"Can't find imported sgt_info from IMPORT_LIST\n");
+					"Can't find imported sgt_info\n");
 				break;
 			}
 
 			/* if size of new private data is different,
-			 * we reallocate it. */
+			 * we reallocate it.
+			 */
 			if (imported->sz_priv != req->op[8]) {
 				kfree(imported->priv);
 				imported->sz_priv = req->op[8];
-				imported->priv = kcalloc(1, req->op[8], GFP_KERNEL);
+				imported->priv = kcalloc(1, req->op[8],
+							 GFP_KERNEL);
 				if (!imported->priv) {
-					dev_err(hy_drv_priv->dev,
-						"Fail to allocate priv\n");
-
 					/* set it invalid */
 					imported->valid = 0;
 					break;
@@ -181,26 +190,20 @@ static void cmd_process_work(struct work_struct *work)
 
 		imported = kcalloc(1, sizeof(*imported), GFP_KERNEL);
 
-		if (!imported) {
-			dev_err(hy_drv_priv->dev,
-				"No memory left to be allocated\n");
+		if (!imported)
 			break;
-		}
 
 		imported->sz_priv = req->op[8];
 		imported->priv = kcalloc(1, req->op[8], GFP_KERNEL);
 
 		if (!imported->priv) {
-			dev_err(hy_drv_priv->dev,
-				"Fail to allocate priv\n");
-
 			kfree(imported);
 			break;
 		}
 
 		imported->hid.id = req->op[0];
 
-		for (i=0; i<3; i++)
+		for (i = 0; i < 3; i++)
 			imported->hid.rng_key[i] = req->op[i+1];
 
 		imported->nents = req->op[4];
@@ -230,13 +233,13 @@ static void cmd_process_work(struct work_struct *work)
 		break;
 
 	case HYPER_DMABUF_OPS_TO_REMOTE:
-		/* notifying dmabuf map/unmap to importer (probably not needed) */
-		/* for dmabuf synchronization */
+		/* notifying dmabuf map/unmap to importer
+		 * (probably not needed) for dmabuf synchronization
+		 */
 		break;
 
 	default:
 		/* shouldn't get here */
-		/* no matched command, nothing to do.. just return error */
 		break;
 	}
 
@@ -280,20 +283,22 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		 * op0~3 : hyper_dmabuf_id
 		 */
 		dev_dbg(hy_drv_priv->dev,
-			"%s: processing HYPER_DMABUF_NOTIFY_UNEXPORT\n", __func__);
+			"processing HYPER_DMABUF_NOTIFY_UNEXPORT\n");
 
 		imported = hyper_dmabuf_find_imported(hid);
 
 		if (imported) {
 			/* if anything is still using dma_buf */
 			if (imported->importers) {
-				/*
-				 * Buffer is still in  use, just mark that it should
-				 * not be allowed to export its fd anymore.
+				/* Buffer is still in  use, just mark that
+				 * it should not be allowed to export its fd
+				 * anymore.
 				 */
 				imported->valid = false;
 			} else {
-				/* No one is using buffer, remove it from imported list */
+				/* No one is using buffer, remove it from
+				 * imported list
+				 */
 				hyper_dmabuf_remove_imported(hid);
 				kfree(imported);
 			}
@@ -306,10 +311,12 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 
 	/* dma buf remote synchronization */
 	if (req->cmd == HYPER_DMABUF_OPS_TO_SOURCE) {
-		/* notifying dmabuf map/unmap to exporter, map will make the driver to do shadow mapping
-		 * or unmapping for synchronization with original exporter (e.g. i915) */
-
-		/* command : DMABUF_OPS_TO_SOURCE.
+		/* notifying dmabuf map/unmap to exporter, map will
+		 * make the driver to do shadow mapping
+		 * or unmapping for synchronization with original
+		 * exporter (e.g. i915)
+		 *
+		 * command : DMABUF_OPS_TO_SOURCE.
 		 * op0~3 : hyper_dmabuf_id
 		 * op1 : enum hyper_dmabuf_ops {....}
 		 */
@@ -330,27 +337,30 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	if (req->cmd == HYPER_DMABUF_EXPORT_FD) {
 		/* find a corresponding SGT for the id */
 		dev_dbg(hy_drv_priv->dev,
-			"Processing HYPER_DMABUF_EXPORT_FD for buffer {id:%d key:%d %d %d}\n",
+			"HYPER_DMABUF_EXPORT_FD for {id:%d key:%d %d %d}\n",
 			hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
 		exported = hyper_dmabuf_find_exported(hid);
 
 		if (!exported) {
 			dev_err(hy_drv_priv->dev,
-				"critical err: requested sgt_info can't be found for buffer {id:%d key:%d %d %d}\n",
-				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+				"buffer {id:%d key:%d %d %d} not found\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1],
+				hid.rng_key[2]);
 
 			req->stat = HYPER_DMABUF_REQ_ERROR;
 		} else if (!exported->valid) {
 			dev_dbg(hy_drv_priv->dev,
-				"Buffer no longer valid - cannot export fd for buffer {id:%d key:%d %d %d}\n",
-				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+				"Buffer no longer valid {id:%d key:%d %d %d}\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1],
+				hid.rng_key[2]);
 
 			req->stat = HYPER_DMABUF_REQ_ERROR;
 		} else {
 			dev_dbg(hy_drv_priv->dev,
-				"Buffer still valid - can export fd for buffer {id:%d key:%d %d %d}\n",
-				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+				"Buffer still valid {id:%d key:%d %d %d}\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1],
+				hid.rng_key[2]);
 
 			exported->active++;
 			req->stat = HYPER_DMABUF_REQ_PROCESSED;
@@ -360,15 +370,16 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 
 	if (req->cmd == HYPER_DMABUF_EXPORT_FD_FAILED) {
 		dev_dbg(hy_drv_priv->dev,
-			"Processing HYPER_DMABUF_EXPORT_FD_FAILED for buffer {id:%d key:%d %d %d}\n",
+			"HYPER_DMABUF_EXPORT_FD_FAILED for {id:%d key:%d %d %d}\n",
 			hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
 
 		exported = hyper_dmabuf_find_exported(hid);
 
 		if (!exported) {
 			dev_err(hy_drv_priv->dev,
-				"critical err: requested sgt_info can't be found for buffer {id:%d key:%d %d %d}\n",
-				hid.id, hid.rng_key[0], hid.rng_key[1], hid.rng_key[2]);
+				"buffer {id:%d key:%d %d %d} not found\n",
+				hid.id, hid.rng_key[0], hid.rng_key[1],
+				hid.rng_key[2]);
 
 			req->stat = HYPER_DMABUF_REQ_ERROR;
 		} else {
@@ -382,19 +393,14 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		"%s: putting request to workqueue\n", __func__);
 	temp_req = kmalloc(sizeof(*temp_req), GFP_KERNEL);
 
-	if (!temp_req) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
+	if (!temp_req)
 		return -ENOMEM;
-	}
 
 	memcpy(temp_req, req, sizeof(*temp_req));
 
 	proc = kcalloc(1, sizeof(struct cmd_process), GFP_KERNEL);
 
 	if (!proc) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
 		kfree(temp_req);
 		return -ENOMEM;
 	}

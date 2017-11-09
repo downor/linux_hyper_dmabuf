@@ -44,7 +44,6 @@
 
 #ifdef CONFIG_HYPER_DMABUF_XEN
 #include "xen/hyper_dmabuf_xen_drv.h"
-extern struct hyper_dmabuf_backend_ops xen_backend_ops;
 #endif
 
 MODULE_LICENSE("GPL and additional rights");
@@ -52,14 +51,11 @@ MODULE_AUTHOR("Intel Corporation");
 
 struct hyper_dmabuf_private *hy_drv_priv;
 
-long hyper_dmabuf_ioctl(struct file *filp,
-			unsigned int cmd, unsigned long param);
-
-static void hyper_dmabuf_force_free(struct exported_sgt_info* exported,
-			            void *attr)
+static void hyper_dmabuf_force_free(struct exported_sgt_info *exported,
+				    void *attr)
 {
 	struct ioctl_hyper_dmabuf_unexport unexport_attr;
-	struct file *filp = (struct file*) attr;
+	struct file *filp = (struct file *)attr;
 
 	if (!filp || !exported)
 		return;
@@ -97,7 +93,8 @@ int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 
 #ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 
-unsigned int hyper_dmabuf_event_poll(struct file *filp, struct poll_table_struct *wait)
+unsigned int hyper_dmabuf_event_poll(struct file *filp,
+				     struct poll_table_struct *wait)
 {
 	unsigned int mask = 0;
 
@@ -153,15 +150,17 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 
 			mutex_unlock(&hy_drv_priv->event_read_lock);
 			ret = wait_event_interruptible(hy_drv_priv->event_wait,
-						       !list_empty(&hy_drv_priv->event_list));
+				  !list_empty(&hy_drv_priv->event_list));
 
 			if (ret == 0)
-				ret = mutex_lock_interruptible(&hy_drv_priv->event_read_lock);
+				ret = mutex_lock_interruptible(
+					&hy_drv_priv->event_read_lock);
 
 			if (ret)
 				return ret;
 		} else {
-			unsigned length = (sizeof(struct hyper_dmabuf_event_hdr) + e->event_data.hdr.size);
+			unsigned int length = (sizeof(e->event_data.hdr) +
+						      e->event_data.hdr.size);
 
 			if (length > count - ret) {
 put_back_event:
@@ -172,20 +171,22 @@ put_back_event:
 			}
 
 			if (copy_to_user(buffer + ret, &e->event_data.hdr,
-					 sizeof(struct hyper_dmabuf_event_hdr))) {
+					 sizeof(e->event_data.hdr))) {
 				if (ret == 0)
 					ret = -EFAULT;
 
 				goto put_back_event;
 			}
 
-			ret += sizeof(struct hyper_dmabuf_event_hdr);
+			ret += sizeof(e->event_data.hdr);
 
-			if (copy_to_user(buffer + ret, e->event_data.data, e->event_data.hdr.size)) {
+			if (copy_to_user(buffer + ret, e->event_data.data,
+					 e->event_data.hdr.size)) {
 				/* error while copying void *data */
 
 				struct hyper_dmabuf_event_hdr dummy_hdr = {0};
-				ret -= sizeof(struct hyper_dmabuf_event_hdr);
+
+				ret -= sizeof(e->event_data.hdr);
 
 				/* nullifying hdr of the event in user buffer */
 				if (copy_to_user(buffer + ret, &dummy_hdr,
@@ -212,8 +213,7 @@ put_back_event:
 
 #endif
 
-static struct file_operations hyper_dmabuf_driver_fops =
-{
+static const struct file_operations hyper_dmabuf_driver_fops = {
 	.owner = THIS_MODULE,
 	.open = hyper_dmabuf_open,
 	.release = hyper_dmabuf_release,
@@ -246,7 +246,7 @@ int register_device(void)
 
 	hy_drv_priv->dev = hyper_dmabuf_miscdev.this_device;
 
-	/* TODO: Check if there is a different way to initialize dma mask nicely */
+	/* TODO: Check if there is a different way to initialize dma mask */
 	dma_coerce_mask_and_coherent(hy_drv_priv->dev, DMA_BIT_MASK(64));
 
 	return ret;
@@ -264,32 +264,30 @@ static int __init hyper_dmabuf_drv_init(void)
 {
 	int ret = 0;
 
-	printk( KERN_NOTICE "hyper_dmabuf_starting: Initialization started\n");
+	printk(KERN_NOTICE "hyper_dmabuf_starting: Initialization started\n");
 
 	hy_drv_priv = kcalloc(1, sizeof(struct hyper_dmabuf_private),
 			      GFP_KERNEL);
 
 	if (!hy_drv_priv) {
-		printk( KERN_ERR "hyper_dmabuf: Failed to create drv\n");
+		printk(KERN_ERR "hyper_dmabuf: Failed to create drv\n");
 		return -1;
 	}
 
 	ret = register_device();
-	if (ret < 0) {
+	if (ret < 0)
 		return ret;
-	}
 
 /* currently only supports XEN hypervisor */
-
 #ifdef CONFIG_HYPER_DMABUF_XEN
 	hy_drv_priv->backend_ops = &xen_backend_ops;
 #else
 	hy_drv_priv->backend_ops = NULL;
-	printk( KERN_ERR "hyper_dmabuf drv currently supports XEN only.\n");
+	printk(KERN_ERR "hyper_dmabuf drv currently supports XEN only.\n");
 #endif
 
 	if (hy_drv_priv->backend_ops == NULL) {
-		printk( KERN_ERR "Hyper_dmabuf: failed to be loaded - no backend found\n");
+		printk(KERN_ERR "Hyper_dmabuf: no backend found\n");
 		return -1;
 	}
 
@@ -385,10 +383,7 @@ static void hyper_dmabuf_drv_exit(void)
 	dev_info(hy_drv_priv->dev,
 		 "hyper_dmabuf driver: Exiting\n");
 
-	if (hy_drv_priv) {
-		kfree(hy_drv_priv);
-		hy_drv_priv = NULL;
-	}
+	kfree(hy_drv_priv);
 
 	unregister_device();
 }

@@ -28,8 +28,8 @@
 #define MAX_SIZE_PRIV_DATA 192
 
 typedef struct {
-        int id;
-        int rng_key[3]; /* 12bytes long random number */
+	int id;
+	int rng_key[3]; /* 12bytes long random number */
 } hyper_dmabuf_id_t;
 
 struct hyper_dmabuf_event_hdr {
@@ -115,20 +115,20 @@ struct ioctl_hyper_dmabuf_query {
 /* DMABUF query */
 
 enum hyper_dmabuf_query {
-        HYPER_DMABUF_QUERY_TYPE = 0x10,
-        HYPER_DMABUF_QUERY_EXPORTER,
-        HYPER_DMABUF_QUERY_IMPORTER,
-        HYPER_DMABUF_QUERY_SIZE,
-        HYPER_DMABUF_QUERY_BUSY,
-        HYPER_DMABUF_QUERY_UNEXPORTED,
-        HYPER_DMABUF_QUERY_DELAYED_UNEXPORTED,
-        HYPER_DMABUF_QUERY_PRIV_INFO_SIZE,
-        HYPER_DMABUF_QUERY_PRIV_INFO,
+	HYPER_DMABUF_QUERY_TYPE = 0x10,
+	HYPER_DMABUF_QUERY_EXPORTER,
+	HYPER_DMABUF_QUERY_IMPORTER,
+	HYPER_DMABUF_QUERY_SIZE,
+	HYPER_DMABUF_QUERY_BUSY,
+	HYPER_DMABUF_QUERY_UNEXPORTED,
+	HYPER_DMABUF_QUERY_DELAYED_UNEXPORTED,
+	HYPER_DMABUF_QUERY_PRIV_INFO_SIZE,
+	HYPER_DMABUF_QUERY_PRIV_INFO,
 };
 
 enum hyper_dmabuf_status {
-        EXPORTED= 0x01,
-        IMPORTED,
+	EXPORTED = 0x01,
+	IMPORTED,
 };
 
 #endif //__LINUX_PUBLIC_HYPER_DMABUF_H__

@@ -89,9 +89,8 @@ struct pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 	if (!pg_info)
 		return NULL;
 
-	pg_info->pgs = kmalloc(sizeof(struct page *) *
-			       hyper_dmabuf_get_num_pgs(sgt),
-			       GFP_KERNEL);
+	pg_info->pgs = kmalloc_array(hyper_dmabuf_get_num_pgs(sgt),
+				     sizeof(struct page *), GFP_KERNEL);
 
 	if (!pg_info->pgs) {
 		kfree(pg_info);
@@ -137,17 +136,17 @@ struct pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 }
 
 /* create sg_table with given pages and other parameters */
-struct sg_table* hyper_dmabuf_create_sgt(struct page **pgs,
-					 int frst_ofst, int last_len, int nents)
+struct sg_table *hyper_dmabuf_create_sgt(struct page **pgs,
+					 int frst_ofst, int last_len,
+					 int nents)
 {
 	struct sg_table *sgt;
 	struct scatterlist *sgl;
 	int i, ret;
 
 	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
-	if (!sgt) {
+	if (!sgt)
 		return NULL;
-	}
 
 	ret = sg_alloc_table(sgt, nents, GFP_KERNEL);
 	if (ret) {
@@ -163,7 +162,7 @@ struct sg_table* hyper_dmabuf_create_sgt(struct page **pgs,
 
 	sg_set_page(sgl, pgs[0], PAGE_SIZE-frst_ofst, frst_ofst);
 
-	for (i=1; i<nents-1; i++) {
+	for (i = 1; i < nents-1; i++) {
 		sgl = sg_next(sgl);
 		sg_set_page(sgl, pgs[i], PAGE_SIZE, 0);
 	}

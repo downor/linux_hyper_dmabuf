@@ -91,7 +91,7 @@ static int hyper_dmabuf_send_export_msg(struct exported_sgt_info *exported,
 	/* now create request for importer via ring */
 	op[0] = exported->hid.id;
 
-	for (i=0; i<3; i++)
+	for (i = 0; i < 3; i++)
 		op[i+1] = exported->hid.rng_key[i];
 
 	if (pg_info) {
@@ -113,10 +113,8 @@ static int hyper_dmabuf_send_export_msg(struct exported_sgt_info *exported,
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-	if(!req) {
-		dev_err(hy_drv_priv->dev, "no more space left\n");
+	if (!req)
 		return -1;
-	}
 
 	/* composing a message to the importer */
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT, &op[0]);
@@ -161,69 +159,71 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 					     export_remote_attr->remote_domain);
 	if (hid.id != -1) {
 		exported = hyper_dmabuf_find_exported(hid);
-		if (exported != NULL) {
-			if (exported->valid) {
-				/*
-				 * Check if unexport is already scheduled for that buffer,
-				 * if so try to cancel it. If that will fail, buffer needs
-				 * to be reexport once again.
-				 */
-				if (exported->unexport_sched) {
-					if (!cancel_delayed_work_sync(&exported->unexport)) {
-						dma_buf_put(dma_buf);
-						goto reexport;
-					}
-					exported->unexport_sched = false;
-				}
 
-				/* if there's any change in size of private data.
-				 * we reallocate space for private data with new size */
-				if (export_remote_attr->sz_priv != exported->sz_priv) {
-					kfree(exported->priv);
+		if (!exported)
+			goto reexport;
 
-					/* truncating size */
-					if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA) {
-						exported->sz_priv = MAX_SIZE_PRIV_DATA;
-					} else {
-						exported->sz_priv = export_remote_attr->sz_priv;
-					}
+		if (exported->valid == false)
+			goto reexport;
 
-					exported->priv = kcalloc(1, exported->sz_priv, GFP_KERNEL);
-
-					if(!exported->priv) {
-						dev_err(hy_drv_priv->dev,
-							"no more space left for priv\n");
-						hyper_dmabuf_remove_exported(exported->hid);
-						hyper_dmabuf_cleanup_sgt_info(exported, true);
-						kfree(exported);
-						dma_buf_put(dma_buf);
-						return -ENOMEM;
-					}
-				}
-
-				/* update private data in sgt_info with new ones */
-				ret = copy_from_user(exported->priv, export_remote_attr->priv,
-						     exported->sz_priv);
-				if (ret) {
-					dev_err(hy_drv_priv->dev,
-						"Failed to load a new private data\n");
-					ret = -EINVAL;
-				} else {
-					/* send an export msg for updating priv in importer */
-					ret = hyper_dmabuf_send_export_msg(exported, NULL);
-
-					if (ret < 0) {
-						dev_err(hy_drv_priv->dev,
-							"Failed to send a new private data\n");
-						ret = -EBUSY;
-					}
-				}
-
+		/*
+		 * Check if unexport is already scheduled for that buffer,
+		 * if so try to cancel it. If that will fail, buffer needs
+		 * to be reexport once again.
+		 */
+		if (exported->unexport_sched) {
+			if (!cancel_delayed_work_sync(&exported->unexport)) {
 				dma_buf_put(dma_buf);
-				export_remote_attr->hid = hid;
-				return ret;
+				goto reexport;
+			}
+			exported->unexport_sched = false;
+		}
+
+		/* if there's any change in size of private data.
+		 * we reallocate space for private data with new size
+		 */
+		if (export_remote_attr->sz_priv != exported->sz_priv) {
+			kfree(exported->priv);
+
+			/* truncating size */
+			if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA)
+				exported->sz_priv = MAX_SIZE_PRIV_DATA;
+			else
+				exported->sz_priv = export_remote_attr->sz_priv;
+
+			exported->priv = kcalloc(1, exported->sz_priv,
+						 GFP_KERNEL);
+
+			if (!exported->priv) {
+				hyper_dmabuf_remove_exported(exported->hid);
+				hyper_dmabuf_cleanup_sgt_info(exported, true);
+				kfree(exported);
+				dma_buf_put(dma_buf);
+				return -ENOMEM;
 			}
 		}
+
+		/* update private data in sgt_info with new ones */
+		ret = copy_from_user(exported->priv, export_remote_attr->priv,
+				     exported->sz_priv);
+		if (ret) {
+			dev_err(hy_drv_priv->dev,
+				"Failed to load a new private data\n");
+			ret = -EINVAL;
+		} else {
+			/* send an export msg for updating priv in importer */
+			ret = hyper_dmabuf_send_export_msg(exported, NULL);
+
+			if (ret < 0) {
+				dev_err(hy_drv_priv->dev,
+					"Failed to send a new private data\n");
+				ret = -EBUSY;
+			}
+		}
+
+		dma_buf_put(dma_buf);
+		export_remote_attr->hid = hid;
+		return ret;
 	}
 
 reexport:
@@ -244,25 +244,22 @@ reexport:
 
 	exported = kcalloc(1, sizeof(*exported), GFP_KERNEL);
 
-	if(!exported) {
-		dev_err(hy_drv_priv->dev, "no more space left\n");
+	if (!exported) {
 		ret = -ENOMEM;
 		goto fail_sgt_info_creation;
 	}
 
 	/* possible truncation */
-	if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA) {
+	if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA)
 		exported->sz_priv = MAX_SIZE_PRIV_DATA;
-	} else {
+	else
 		exported->sz_priv = export_remote_attr->sz_priv;
-	}
 
 	/* creating buffer for private data of buffer */
-	if(exported->sz_priv != 0) {
+	if (exported->sz_priv != 0) {
 		exported->priv = kcalloc(1, exported->sz_priv, GFP_KERNEL);
 
-		if(!exported->priv) {
-			dev_err(hy_drv_priv->dev, "no more space left\n");
+		if (!exported->priv) {
 			ret = -ENOMEM;
 			goto fail_priv_creation;
 		}
@@ -273,7 +270,7 @@ reexport:
 	exported->hid = hyper_dmabuf_get_hid();
 
 	/* no more exported dmabuf allowed */
-	if(exported->hid.id == -1) {
+	if (exported->hid.id == -1) {
 		dev_err(hy_drv_priv->dev,
 			"exceeds allowed number of dmabuf to be exported\n");
 		ret = -ENOMEM;
@@ -286,28 +283,27 @@ reexport:
 
 	exported->active_sgts = kmalloc(sizeof(struct sgt_list), GFP_KERNEL);
 	if (!exported->active_sgts) {
-		dev_err(hy_drv_priv->dev, "no more space left\n");
 		ret = -ENOMEM;
 		goto fail_map_active_sgts;
 	}
 
-	exported->active_attached = kmalloc(sizeof(struct attachment_list), GFP_KERNEL);
+	exported->active_attached = kmalloc(sizeof(struct attachment_list),
+					    GFP_KERNEL);
 	if (!exported->active_attached) {
-		dev_err(hy_drv_priv->dev, "no more space left\n");
 		ret = -ENOMEM;
 		goto fail_map_active_attached;
 	}
 
-	exported->va_kmapped = kmalloc(sizeof(struct kmap_vaddr_list), GFP_KERNEL);
+	exported->va_kmapped = kmalloc(sizeof(struct kmap_vaddr_list),
+				       GFP_KERNEL);
 	if (!exported->va_kmapped) {
-		dev_err(hy_drv_priv->dev, "no more space left\n");
 		ret = -ENOMEM;
 		goto fail_map_va_kmapped;
 	}
 
-	exported->va_vmapped = kmalloc(sizeof(struct vmap_vaddr_list), GFP_KERNEL);
+	exported->va_vmapped = kmalloc(sizeof(struct vmap_vaddr_list),
+				       GFP_KERNEL);
 	if (!exported->va_vmapped) {
-		dev_err(hy_drv_priv->dev, "no more space left\n");
 		ret = -ENOMEM;
 		goto fail_map_va_vmapped;
 	}
@@ -436,31 +432,32 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 	/* send notification for export_fd to exporter */
 	op[0] = imported->hid.id;
 
-	for (i=0; i<3; i++)
+	for (i = 0; i < 3; i++)
 		op[i+1] = imported->hid.rng_key[i];
 
-	dev_dbg(hy_drv_priv->dev, "Exporting fd of buffer {id:%d key:%d %d %d}\n",
-		imported->hid.id, imported->hid.rng_key[0], imported->hid.rng_key[1],
-		imported->hid.rng_key[2]);
+	dev_dbg(hy_drv_priv->dev, "Export FD of buffer {id:%d key:%d %d %d}\n",
+		imported->hid.id, imported->hid.rng_key[0],
+		imported->hid.rng_key[1], imported->hid.rng_key[2]);
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-	if (!req) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
+	if (!req)
 		return -ENOMEM;
-	}
 
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD, &op[0]);
 
 	ret = ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req, true);
 
 	if (ret < 0) {
-		/* in case of timeout other end eventually will receive request, so we need to undo it */
-		hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD_FAILED, &op[0]);
+		/* in case of timeout other end eventually will receive request,
+		 * so we need to undo it
+		 */
+		hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD_FAILED,
+					&op[0]);
 		ops->send_req(op[0], req, false);
 		kfree(req);
-		dev_err(hy_drv_priv->dev, "Failed to create sgt or notify exporter\n");
+		dev_err(hy_drv_priv->dev,
+			"Failed to create sgt or notify exporter\n");
 		imported->importers--;
 		mutex_unlock(&hy_drv_priv->lock);
 		return ret;
@@ -471,64 +468,69 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 	if (ret == HYPER_DMABUF_REQ_ERROR) {
 		dev_err(hy_drv_priv->dev,
 			"Buffer invalid {id:%d key:%d %d %d}, cannot import\n",
-			imported->hid.id, imported->hid.rng_key[0], imported->hid.rng_key[1],
-			imported->hid.rng_key[2]);
+			imported->hid.id, imported->hid.rng_key[0],
+			imported->hid.rng_key[1], imported->hid.rng_key[2]);
 
 		imported->importers--;
 		mutex_unlock(&hy_drv_priv->lock);
 		return -EINVAL;
-	} else {
-		dev_dbg(hy_drv_priv->dev, "Can import buffer {id:%d key:%d %d %d}\n",
-			imported->hid.id, imported->hid.rng_key[0], imported->hid.rng_key[1],
-			imported->hid.rng_key[2]);
-
-		ret = 0;
 	}
 
+	ret = 0;
+
 	dev_dbg(hy_drv_priv->dev,
-		  "%s Found buffer gref %d  off %d last len %d nents %d domain %d\n",
-		  __func__, imported->ref_handle, imported->frst_ofst,
-		  imported->last_len, imported->nents, HYPER_DMABUF_DOM_ID(imported->hid));
+		"Found buffer gref %d off %d\n",
+		imported->ref_handle, imported->frst_ofst);
+
+	dev_dbg(hy_drv_priv->dev,
+		"last len %d nents %d domain %d\n",
+		imported->last_len, imported->nents,
+		HYPER_DMABUF_DOM_ID(imported->hid));
 
 	if (!imported->sgt) {
 		dev_dbg(hy_drv_priv->dev,
-			"%s buffer {id:%d key:%d %d %d} pages not mapped yet\n", __func__,
-			imported->hid.id, imported->hid.rng_key[0], imported->hid.rng_key[1],
-			imported->hid.rng_key[2]);
+			"buffer {id:%d key:%d %d %d} pages not mapped yet\n",
+			imported->hid.id, imported->hid.rng_key[0],
+			imported->hid.rng_key[1], imported->hid.rng_key[2]);
 
 		data_pgs = ops->map_shared_pages(imported->ref_handle,
-						   HYPER_DMABUF_DOM_ID(imported->hid),
-						   imported->nents,
-						   &imported->refs_info);
+					HYPER_DMABUF_DOM_ID(imported->hid),
+					imported->nents,
+					&imported->refs_info);
 
 		if (!data_pgs) {
 			dev_err(hy_drv_priv->dev,
-				"Cannot map pages of buffer {id:%d key:%d %d %d}\n",
-				imported->hid.id, imported->hid.rng_key[0], imported->hid.rng_key[1],
+				"can't map pages hid {id:%d key:%d %d %d}\n",
+				imported->hid.id, imported->hid.rng_key[0],
+				imported->hid.rng_key[1],
 				imported->hid.rng_key[2]);
 
 			imported->importers--;
+
 			req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-			if (!req) {
-				dev_err(hy_drv_priv->dev,
-					"No more space left\n");
+			if (!req)
 				return -ENOMEM;
-			}
 
-			hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD_FAILED, &op[0]);
-			ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req, false);
+			hyper_dmabuf_create_req(req,
+						HYPER_DMABUF_EXPORT_FD_FAILED,
+						&op[0]);
+			ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req,
+							  false);
 			kfree(req);
 			mutex_unlock(&hy_drv_priv->lock);
 			return -EINVAL;
 		}
 
-		imported->sgt = hyper_dmabuf_create_sgt(data_pgs, imported->frst_ofst,
-							imported->last_len, imported->nents);
+		imported->sgt = hyper_dmabuf_create_sgt(data_pgs,
+							imported->frst_ofst,
+							imported->last_len,
+							imported->nents);
 
 	}
 
-	export_fd_attr->fd = hyper_dmabuf_export_fd(imported, export_fd_attr->flags);
+	export_fd_attr->fd = hyper_dmabuf_export_fd(imported,
+						    export_fd_attr->flags);
 
 	if (export_fd_attr->fd < 0) {
 		/* fail to get fd */
@@ -566,21 +568,19 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-	if (!req) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
+	if (!req)
 		return;
-	}
 
 	op[0] = exported->hid.id;
 
-	for (i=0; i<3; i++)
+	for (i = 0; i < 3; i++)
 		op[i+1] = exported->hid.rng_key[i];
 
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_NOTIFY_UNEXPORT, &op[0]);
 
 	/* Now send unexport request to remote domain, marking
-	 * that buffer should not be used anymore */
+	 * that buffer should not be used anymore
+	 */
 	ret = ops->send_req(exported->rdomid, req, true);
 	if (ret < 0) {
 		dev_err(hy_drv_priv->dev,
@@ -589,12 +589,10 @@ static void hyper_dmabuf_delayed_unexport(struct work_struct *work)
 			exported->hid.rng_key[1], exported->hid.rng_key[2]);
 	}
 
-	/* free msg */
 	kfree(req);
 	exported->unexport_sched = false;
 
-	/*
-	 * Immediately clean-up if it has never been exported by importer
+	/* Immediately clean-up if it has never been exported by importer
 	 * (so no SGT is constructed on importer).
 	 * clean it up later in remote sync when final release ops
 	 * is called (importer does this only when there's no
@@ -669,25 +667,31 @@ static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
 		exported = hyper_dmabuf_find_exported(query_attr->hid);
 		if (exported) {
 			ret = hyper_dmabuf_query_exported(exported,
-							  query_attr->item, &query_attr->info);
+							  query_attr->item,
+							  &query_attr->info);
 		} else {
 			dev_err(hy_drv_priv->dev,
-				"DMA BUF {id:%d key:%d %d %d} not in the export list\n",
-				query_attr->hid.id, query_attr->hid.rng_key[0],
-				query_attr->hid.rng_key[1], query_attr->hid.rng_key[2]);
+				"hid {id:%d key:%d %d %d} not in exp list\n",
+				query_attr->hid.id,
+				query_attr->hid.rng_key[0],
+				query_attr->hid.rng_key[1],
+				query_attr->hid.rng_key[2]);
 			return -ENOENT;
 		}
 	} else {
 		/* query for imported dmabuf */
 		imported = hyper_dmabuf_find_imported(query_attr->hid);
 		if (imported) {
-			ret = hyper_dmabuf_query_imported(imported, query_attr->item,
+			ret = hyper_dmabuf_query_imported(imported,
+							  query_attr->item,
 							  &query_attr->info);
 		} else {
 			dev_err(hy_drv_priv->dev,
-				"DMA BUF {id:%d key:%d %d %d} not in the imported list\n",
-				query_attr->hid.id, query_attr->hid.rng_key[0],
-				query_attr->hid.rng_key[1], query_attr->hid.rng_key[2]);
+				"hid {id:%d key:%d %d %d} not in imp list\n",
+				query_attr->hid.id,
+				query_attr->hid.rng_key[0],
+				query_attr->hid.rng_key[1],
+				query_attr->hid.rng_key[2]);
 			return -ENOENT;
 		}
 	}
@@ -696,12 +700,18 @@ static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
 }
 
 const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_TX_CH_SETUP, hyper_dmabuf_tx_ch_setup_ioctl, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_RX_CH_SETUP, hyper_dmabuf_rx_ch_setup_ioctl, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_REMOTE, hyper_dmabuf_export_remote_ioctl, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_FD, hyper_dmabuf_export_fd_ioctl, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_UNEXPORT, hyper_dmabuf_unexport_ioctl, 0),
-	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY, hyper_dmabuf_query_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_TX_CH_SETUP,
+			       hyper_dmabuf_tx_ch_setup_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_RX_CH_SETUP,
+			       hyper_dmabuf_rx_ch_setup_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_REMOTE,
+			       hyper_dmabuf_export_remote_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_EXPORT_FD,
+			       hyper_dmabuf_export_fd_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_UNEXPORT,
+			       hyper_dmabuf_unexport_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY,
+			       hyper_dmabuf_query_ioctl, 0),
 };
 
 long hyper_dmabuf_ioctl(struct file *filp,
@@ -728,21 +738,23 @@ long hyper_dmabuf_ioctl(struct file *filp,
 	}
 
 	kdata = kmalloc(_IOC_SIZE(cmd), GFP_KERNEL);
-	if (!kdata) {
-		dev_err(hy_drv_priv->dev, "no memory\n");
+	if (!kdata)
 		return -ENOMEM;
-	}
 
-	if (copy_from_user(kdata, (void __user *)param, _IOC_SIZE(cmd)) != 0) {
-		dev_err(hy_drv_priv->dev, "failed to copy from user arguments\n");
+	if (copy_from_user(kdata, (void __user *)param,
+			   _IOC_SIZE(cmd)) != 0) {
+		dev_err(hy_drv_priv->dev,
+			"failed to copy from user arguments\n");
 		ret = -EFAULT;
 		goto ioctl_error;
 	}
 
 	ret = func(filp, kdata);
 
-	if (copy_to_user((void __user *)param, kdata, _IOC_SIZE(cmd)) != 0) {
-		dev_err(hy_drv_priv->dev, "failed to copy to user arguments\n");
+	if (copy_to_user((void __user *)param, kdata,
+			 _IOC_SIZE(cmd)) != 0) {
+		dev_err(hy_drv_priv->dev,
+			"failed to copy to user arguments\n");
 		ret = -EFAULT;
 		goto ioctl_error;
 	}

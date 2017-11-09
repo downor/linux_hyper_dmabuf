@@ -29,23 +29,25 @@
 #include "xen/xenbus.h"
 #include "../hyper_dmabuf_msg.h"
 
+extern int xenstored_ready;
+
 DEFINE_RING_TYPES(xen_comm, struct hyper_dmabuf_req, struct hyper_dmabuf_resp);
 
 struct xen_comm_tx_ring_info {
-        struct xen_comm_front_ring ring_front;
+	struct xen_comm_front_ring ring_front;
 	int rdomain;
-        int gref_ring;
-        int irq;
-        int port;
+	int gref_ring;
+	int irq;
+	int port;
 	struct mutex lock;
 	struct xenbus_watch watch;
 };
 
 struct xen_comm_rx_ring_info {
-        int sdomain;
-        int irq;
-        int evtchn;
-        struct xen_comm_back_ring ring_back;
+	int sdomain;
+	int irq;
+	int evtchn;
+	struct xen_comm_back_ring ring_back;
 	struct gnttab_unmap_grant_ref unmap_op;
 };
 
@@ -70,6 +72,7 @@ void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid);
 void hyper_dmabuf_xen_destroy_comm(void);
 
 /* send request to the remote domain */
-int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req, int wait);
+int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req,
+			      int wait);
 
 #endif // __HYPER_DMABUF_XEN_COMM_H__

@@ -34,13 +34,16 @@ struct hyper_dmabuf_ioctl_desc {
 	const char *name;
 };
 
-#define HYPER_DMABUF_IOCTL_DEF(ioctl, _func, _flags) 	\
+#define HYPER_DMABUF_IOCTL_DEF(ioctl, _func, _flags)	\
 	[_IOC_NR(ioctl)] = {				\
 			.cmd = ioctl,			\
 			.func = _func,			\
 			.flags = _flags,		\
 			.name = #ioctl			\
 	}
+
+long hyper_dmabuf_ioctl(struct file *filp,
+			unsigned int cmd, unsigned long param);
 
 int hyper_dmabuf_unexport_ioctl(struct file *filp, void *data);
 
