@@ -28,7 +28,6 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/cdev.h>
 #include <linux/hashtable.h>

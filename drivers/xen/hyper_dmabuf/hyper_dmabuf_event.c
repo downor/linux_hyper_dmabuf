@@ -28,16 +28,14 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_event.h"
 
-static void hyper_dmabuf_send_event(struct hyper_dmabuf_event *e)
+static void send_event(struct hyper_dmabuf_event *e)
 {
 	struct hyper_dmabuf_event *oldest;
 	unsigned long irqflags;
@@ -110,7 +108,7 @@ int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 	e->event_data.data = (void *)imported->priv;
 	e->event_data.hdr.size = imported->sz_priv;
 
-	hyper_dmabuf_send_event(e);
+	send_event(e);
 
 	dev_dbg(hy_drv_priv->dev,
 		"event number = %d :", hy_drv_priv->pending);

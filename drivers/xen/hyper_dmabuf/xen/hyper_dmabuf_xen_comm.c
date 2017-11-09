@@ -26,13 +26,10 @@
  *
  */
 
-#include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
-#include <linux/time.h>
 #include <xen/grant_table.h>
 #include <xen/events.h>
 #include <xen/xenbus.h>
@@ -152,7 +149,7 @@ static int xen_comm_get_ring_details(int domid, int rdomid,
 	return (ret <= 0 ? 1 : 0);
 }
 
-void xen_get_domid_delayed(struct work_struct *unused)
+static void xen_get_domid_delayed(struct work_struct *unused)
 {
 	struct xenbus_transaction xbt;
 	int domid, ret;
@@ -191,7 +188,7 @@ void xen_get_domid_delayed(struct work_struct *unused)
 	}
 }
 
-int hyper_dmabuf_xen_get_domid(void)
+int xen_be_get_domid(void)
 {
 	struct xenbus_transaction xbt;
 	int domid;
@@ -261,22 +258,22 @@ static void remote_dom_exporter_watch_cb(struct xenbus_watch *watch,
 	 * connect to it.
 	 */
 
-	ret = xen_comm_get_ring_details(hyper_dmabuf_xen_get_domid(),
+	ret = xen_comm_get_ring_details(xen_be_get_domid(),
 					rdom, &grefid, &port);
 
 	if (ring_info && ret != 0) {
 		dev_info(hy_drv_priv->dev,
 			 "Remote exporter closed, cleaninup importer\n");
-		hyper_dmabuf_xen_cleanup_rx_rbuf(rdom);
+		xen_be_cleanup_rx_rbuf(rdom);
 	} else if (!ring_info && ret == 0) {
 		dev_info(hy_drv_priv->dev,
 			 "Registering importer\n");
-		hyper_dmabuf_xen_init_rx_rbuf(rdom);
+		xen_be_init_rx_rbuf(rdom);
 	}
 }
 
 /* exporter needs to generated info for page sharing */
-int hyper_dmabuf_xen_init_tx_rbuf(int domid)
+int xen_be_init_tx_rbuf(int domid)
 {
 	struct xen_comm_tx_ring_info *ring_info;
 	struct xen_comm_sring *sring;
@@ -365,7 +362,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 
 	ret = xen_comm_add_tx_ring(ring_info);
 
-	ret = xen_comm_expose_ring_details(hyper_dmabuf_xen_get_domid(),
+	ret = xen_comm_expose_ring_details(xen_be_get_domid(),
 					   domid,
 					   ring_info->gref_ring,
 					   ring_info->port);
@@ -384,7 +381,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 
 	sprintf((char *)ring_info->watch.node,
 		"/local/domain/%d/data/hyper_dmabuf/%d/port",
-		domid, hyper_dmabuf_xen_get_domid());
+		domid, xen_be_get_domid());
 
 	register_xenbus_watch(&ring_info->watch);
 
@@ -392,7 +389,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 }
 
 /* cleans up exporter ring created for given remote domain */
-void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid)
+void xen_be_cleanup_tx_rbuf(int domid)
 {
 	struct xen_comm_tx_ring_info *ring_info;
 	struct xen_comm_rx_ring_info *rx_ring_info;
@@ -433,7 +430,7 @@ void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid)
 /* importer needs to know about shared page and port numbers for
  * ring buffer and event channel
  */
-int hyper_dmabuf_xen_init_rx_rbuf(int domid)
+int xen_be_init_rx_rbuf(int domid)
 {
 	struct xen_comm_rx_ring_info *ring_info;
 	struct xen_comm_sring *sring;
@@ -456,7 +453,7 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 		return 0;
 	}
 
-	ret = xen_comm_get_ring_details(hyper_dmabuf_xen_get_domid(), domid,
+	ret = xen_comm_get_ring_details(xen_be_get_domid(), domid,
 					&rx_gref, &rx_port);
 
 	if (ret) {
@@ -536,7 +533,7 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 
 	/* Setup communcation channel in opposite direction */
 	if (!xen_comm_find_tx_ring(domid))
-		ret = hyper_dmabuf_xen_init_tx_rbuf(domid);
+		ret = xen_be_init_tx_rbuf(domid);
 
 	ret = request_irq(ring_info->irq,
 			  back_ring_isr, 0,
@@ -554,7 +551,7 @@ fail_no_map_ops:
 }
 
 /* clenas up importer ring create for given source domain */
-void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid)
+void xen_be_cleanup_rx_rbuf(int domid)
 {
 	struct xen_comm_rx_ring_info *ring_info;
 	struct xen_comm_tx_ring_info *tx_ring_info;
@@ -624,7 +621,7 @@ static void xen_rx_ch_add_delayed(struct work_struct *unused)
 				if (xen_comm_find_rx_ring(i) != NULL)
 					continue;
 
-				ret = hyper_dmabuf_xen_init_rx_rbuf(i);
+				ret = xen_be_init_rx_rbuf(i);
 
 				if (!ret)
 					dev_info(hy_drv_priv->dev,
@@ -672,7 +669,7 @@ void xen_init_comm_env_delayed(struct work_struct *unused)
 	}
 }
 
-int hyper_dmabuf_xen_init_comm_env(void)
+int xen_be_init_comm_env(void)
 {
 	int ret;
 
@@ -699,19 +696,19 @@ int hyper_dmabuf_xen_init_comm_env(void)
 }
 
 /* cleans up all tx/rx rings */
-static void hyper_dmabuf_xen_cleanup_all_rbufs(void)
+static void xen_be_cleanup_all_rbufs(void)
 {
-	xen_comm_foreach_tx_ring(hyper_dmabuf_xen_cleanup_tx_rbuf);
-	xen_comm_foreach_rx_ring(hyper_dmabuf_xen_cleanup_rx_rbuf);
+	xen_comm_foreach_tx_ring(xen_be_cleanup_tx_rbuf);
+	xen_comm_foreach_rx_ring(xen_be_cleanup_rx_rbuf);
 }
 
-void hyper_dmabuf_xen_destroy_comm(void)
+void xen_be_destroy_comm(void)
 {
-	hyper_dmabuf_xen_cleanup_all_rbufs();
+	xen_be_cleanup_all_rbufs();
 	xen_comm_destroy_data_dir();
 }
 
-int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req,
+int xen_be_send_req(int domid, struct hyper_dmabuf_req *req,
 			      int wait)
 {
 	struct xen_comm_front_ring *ring;

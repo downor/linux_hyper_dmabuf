@@ -37,7 +37,6 @@
 #include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_ioctl.h"
-#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
 #include "hyper_dmabuf_event.h"
@@ -51,8 +50,8 @@ MODULE_AUTHOR("Intel Corporation");
 
 struct hyper_dmabuf_private *hy_drv_priv;
 
-static void hyper_dmabuf_force_free(struct exported_sgt_info *exported,
-				    void *attr)
+static void force_free(struct exported_sgt_info *exported,
+		       void *attr)
 {
 	struct ioctl_hyper_dmabuf_unexport unexport_attr;
 	struct file *filp = (struct file *)attr;
@@ -86,7 +85,7 @@ static int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 
 static int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 {
-	hyper_dmabuf_foreach_exported(hyper_dmabuf_force_free, filp);
+	hyper_dmabuf_foreach_exported(force_free, filp);
 
 	return 0;
 }
@@ -369,7 +368,7 @@ static void hyper_dmabuf_drv_exit(void)
 
 	/* destroy id_queue */
 	if (hy_drv_priv->id_queue)
-		destroy_reusable_list();
+		hyper_dmabuf_free_hid_list();
 
 #ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 	/* clean up event queue */

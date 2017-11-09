@@ -28,31 +28,18 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/fs.h>
 #include <linux/slab.h>
-#include <linux/module.h>
 #include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_struct.h"
 #include "hyper_dmabuf_sgl_proc.h"
-#include "hyper_dmabuf_id.h"
-#include "hyper_dmabuf_msg.h"
-#include "hyper_dmabuf_list.h"
 
 #define REFS_PER_PAGE (PAGE_SIZE/sizeof(grant_ref_t))
-
-int dmabuf_refcount(struct dma_buf *dma_buf)
-{
-	if ((dma_buf != NULL) && (dma_buf->file != NULL))
-		return file_count(dma_buf->file);
-
-	return -1;
-}
 
 /* return total number of pages referenced by a sgt
  * for pre-calculation of # of pages behind a given sgt
  */
-static int hyper_dmabuf_get_num_pgs(struct sg_table *sgt)
+static int get_num_pgs(struct sg_table *sgt)
 {
 	struct scatterlist *sgl;
 	int length, i;
@@ -89,8 +76,9 @@ struct pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt)
 	if (!pg_info)
 		return NULL;
 
-	pg_info->pgs = kmalloc_array(hyper_dmabuf_get_num_pgs(sgt),
-				     sizeof(struct page *), GFP_KERNEL);
+	pg_info->pgs = kmalloc_array(get_num_pgs(sgt),
+				     sizeof(struct page *),
+				     GFP_KERNEL);
 
 	if (!pg_info->pgs) {
 		kfree(pg_info);

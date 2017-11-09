@@ -28,7 +28,6 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/dma-buf.h>
 #include "hyper_dmabuf_drv.h"
@@ -36,7 +35,6 @@
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_id.h"
-#include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_sgl_proc.h"
 
 /* Whenever importer does dma operations from remote domain,
@@ -189,7 +187,7 @@ int hyper_dmabuf_remote_sync(hyper_dmabuf_id_t hid, int ops)
 			hyper_dmabuf_remove_exported(hid);
 			kfree(exported);
 			/* store hyper_dmabuf_id in the list for reuse */
-			store_reusable_hid(hid);
+			hyper_dmabuf_store_hid(hid);
 		}
 
 		break;

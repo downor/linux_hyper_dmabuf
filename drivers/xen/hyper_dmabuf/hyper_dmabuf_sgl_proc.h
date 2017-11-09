@@ -25,8 +25,6 @@
 #ifndef __HYPER_DMABUF_IMP_H__
 #define __HYPER_DMABUF_IMP_H__
 
-int dmabuf_refcount(struct dma_buf *dma_buf);
-
 /* extract pages directly from struct sg_table */
 struct pages_info *hyper_dmabuf_ext_pgs(struct sg_table *sgt);
 

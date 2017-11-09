@@ -36,12 +36,16 @@
  */
 #define HYPER_DMABUF_ID_MAX 1000
 
-void store_reusable_hid(hyper_dmabuf_id_t hid);
+/* adding freed hid to the reusable list */
+void hyper_dmabuf_store_hid(hyper_dmabuf_id_t hid);
 
-void destroy_reusable_list(void);
+/* freeing the reusasble list */
+void hyper_dmabuf_free_hid_list(void);
 
+/* getting a hid available to use. */
 hyper_dmabuf_id_t hyper_dmabuf_get_hid(void);
 
+/* comparing two different hid */
 bool hyper_dmabuf_hid_keycomp(hyper_dmabuf_id_t hid1, hyper_dmabuf_id_t hid2);
 
 #endif /*__HYPER_DMABUF_ID_H*/

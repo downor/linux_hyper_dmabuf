@@ -26,25 +26,19 @@
  *
  */
 
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/module.h>
-#include <xen/grant_table.h>
-#include "../hyper_dmabuf_msg.h"
 #include "../hyper_dmabuf_drv.h"
-#include "hyper_dmabuf_xen_drv.h"
 #include "hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_xen_shm.h"
 
 struct hyper_dmabuf_backend_ops xen_backend_ops = {
-	.get_vm_id = hyper_dmabuf_xen_get_domid,
-	.share_pages = hyper_dmabuf_xen_share_pages,
-	.unshare_pages = hyper_dmabuf_xen_unshare_pages,
-	.map_shared_pages = (void *)hyper_dmabuf_xen_map_shared_pages,
-	.unmap_shared_pages = hyper_dmabuf_xen_unmap_shared_pages,
-	.init_comm_env = hyper_dmabuf_xen_init_comm_env,
-	.destroy_comm = hyper_dmabuf_xen_destroy_comm,
-	.init_rx_ch = hyper_dmabuf_xen_init_rx_rbuf,
-	.init_tx_ch = hyper_dmabuf_xen_init_tx_rbuf,
-	.send_req = hyper_dmabuf_xen_send_req,
+	.get_vm_id = xen_be_get_domid,
+	.share_pages = xen_be_share_pages,
+	.unshare_pages = xen_be_unshare_pages,
+	.map_shared_pages = (void *)xen_be_map_shared_pages,
+	.unmap_shared_pages = xen_be_unmap_shared_pages,
+	.init_comm_env = xen_be_init_comm_env,
+	.destroy_comm = xen_be_destroy_comm,
+	.init_rx_ch = xen_be_init_rx_rbuf,
+	.init_tx_ch = xen_be_init_tx_rbuf,
+	.send_req = xen_be_send_req,
 };

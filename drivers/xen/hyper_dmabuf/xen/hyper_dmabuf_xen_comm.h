@@ -51,28 +51,28 @@ struct xen_comm_rx_ring_info {
 	struct gnttab_unmap_grant_ref unmap_op;
 };
 
-int hyper_dmabuf_xen_get_domid(void);
+int xen_be_get_domid(void);
 
-int hyper_dmabuf_xen_init_comm_env(void);
+int xen_be_init_comm_env(void);
 
 /* exporter needs to generated info for page sharing */
-int hyper_dmabuf_xen_init_tx_rbuf(int domid);
+int xen_be_init_tx_rbuf(int domid);
 
 /* importer needs to know about shared page and port numbers
  * for ring buffer and event channel
  */
-int hyper_dmabuf_xen_init_rx_rbuf(int domid);
+int xen_be_init_rx_rbuf(int domid);
 
 /* cleans up exporter ring created for given domain */
-void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid);
+void xen_be_cleanup_tx_rbuf(int domid);
 
 /* cleans up importer ring created for given domain */
-void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid);
+void xen_be_cleanup_rx_rbuf(int domid);
 
-void hyper_dmabuf_xen_destroy_comm(void);
+void xen_be_destroy_comm(void);
 
 /* send request to the remote domain */
-int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req,
-			      int wait);
+int xen_be_send_req(int domid, struct hyper_dmabuf_req *req,
+		    int wait);
 
-#endif // __HYPER_DMABUF_XEN_COMM_H__
+#endif /* __HYPER_DMABUF_XEN_COMM_H__ */
