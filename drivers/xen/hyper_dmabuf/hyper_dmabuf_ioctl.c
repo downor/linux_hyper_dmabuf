@@ -122,6 +122,82 @@ static int send_export_msg(struct exported_sgt_info *exported,
 	return ret;
 }
 
+/* Fast path exporting routine in case same buffer is already exported.
+ * In this function, we skip normal exporting process and just update
+ * private data on both VMs (importer and exporter)
+ *
+ * return '1' if reexport is needed, return '0' if succeeds, return
+ * Kernel error code if something goes wrong
+ */
+static int fastpath_export(hyper_dmabuf_id_t hid, int sz_priv, char *priv)
+{
+	int reexport = 1;
+	int ret = 0;
+	struct exported_sgt_info *exported;
+
+	exported = hyper_dmabuf_find_exported(hid);
+
+	if (!exported)
+		return reexport;
+
+	if (exported->valid == false)
+		return reexport;
+
+	/*
+	 * Check if unexport is already scheduled for that buffer,
+	 * if so try to cancel it. If that will fail, buffer needs
+	 * to be reexport once again.
+	 */
+	if (exported->unexport_sched) {
+		if (!cancel_delayed_work_sync(&exported->unexport))
+			return reexport;
+
+		exported->unexport_sched = false;
+	}
+
+	/* if there's any change in size of private data.
+	 * we reallocate space for private data with new size
+	 */
+	if (sz_priv != exported->sz_priv) {
+		kfree(exported->priv);
+
+		/* truncating size */
+		if (sz_priv > MAX_SIZE_PRIV_DATA)
+			exported->sz_priv = MAX_SIZE_PRIV_DATA;
+		else
+			exported->sz_priv = sz_priv;
+
+		exported->priv = kcalloc(1, exported->sz_priv,
+					 GFP_KERNEL);
+
+		if (!exported->priv) {
+			hyper_dmabuf_remove_exported(exported->hid);
+			hyper_dmabuf_cleanup_sgt_info(exported, true);
+			kfree(exported);
+			return -ENOMEM;
+		}
+	}
+
+	/* update private data in sgt_info with new ones */
+	ret = copy_from_user(exported->priv, priv, exported->sz_priv);
+	if (ret) {
+		dev_err(hy_drv_priv->dev,
+			"Failed to load a new private data\n");
+		ret = -EINVAL;
+	} else {
+		/* send an export msg for updating priv in importer */
+		ret = send_export_msg(exported, NULL);
+
+		if (ret < 0) {
+			dev_err(hy_drv_priv->dev,
+				"Failed to send a new private data\n");
+			ret = -EBUSY;
+		}
+	}
+
+	return ret;
+}
+
 static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_export_remote *export_remote_attr =
@@ -153,79 +229,24 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 	 */
 	hid = hyper_dmabuf_find_hid_exported(dma_buf,
 					     export_remote_attr->remote_domain);
+
 	if (hid.id != -1) {
-		exported = hyper_dmabuf_find_exported(hid);
+		ret = fastpath_export(hid, export_remote_attr->sz_priv,
+				      export_remote_attr->priv);
 
-		if (!exported)
-			goto reexport;
-
-		if (exported->valid == false)
-			goto reexport;
-
-		/*
-		 * Check if unexport is already scheduled for that buffer,
-		 * if so try to cancel it. If that will fail, buffer needs
-		 * to be reexport once again.
+		/* return if fastpath_export succeeds or
+		 * gets some fatal error
 		 */
-		if (exported->unexport_sched) {
-			if (!cancel_delayed_work_sync(&exported->unexport)) {
-				dma_buf_put(dma_buf);
-				goto reexport;
-			}
-			exported->unexport_sched = false;
+		if (ret <= 0) {
+			dma_buf_put(dma_buf);
+			export_remote_attr->hid = hid;
+			return ret;
 		}
-
-		/* if there's any change in size of private data.
-		 * we reallocate space for private data with new size
-		 */
-		if (export_remote_attr->sz_priv != exported->sz_priv) {
-			kfree(exported->priv);
-
-			/* truncating size */
-			if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA)
-				exported->sz_priv = MAX_SIZE_PRIV_DATA;
-			else
-				exported->sz_priv = export_remote_attr->sz_priv;
-
-			exported->priv = kcalloc(1, exported->sz_priv,
-						 GFP_KERNEL);
-
-			if (!exported->priv) {
-				hyper_dmabuf_remove_exported(exported->hid);
-				hyper_dmabuf_cleanup_sgt_info(exported, true);
-				kfree(exported);
-				dma_buf_put(dma_buf);
-				return -ENOMEM;
-			}
-		}
-
-		/* update private data in sgt_info with new ones */
-		ret = copy_from_user(exported->priv, export_remote_attr->priv,
-				     exported->sz_priv);
-		if (ret) {
-			dev_err(hy_drv_priv->dev,
-				"Failed to load a new private data\n");
-			ret = -EINVAL;
-		} else {
-			/* send an export msg for updating priv in importer */
-			ret = send_export_msg(exported, NULL);
-
-			if (ret < 0) {
-				dev_err(hy_drv_priv->dev,
-					"Failed to send a new private data\n");
-				ret = -EBUSY;
-			}
-		}
-
-		dma_buf_put(dma_buf);
-		export_remote_attr->hid = hid;
-		return ret;
 	}
 
-reexport:
 	attachment = dma_buf_attach(dma_buf, hy_drv_priv->dev);
 	if (IS_ERR(attachment)) {
-		dev_err(hy_drv_priv->dev, "Cannot get attachment\n");
+		dev_err(hy_drv_priv->dev, "cannot get attachment\n");
 		ret = PTR_ERR(attachment);
 		goto fail_attach;
 	}
@@ -233,7 +254,7 @@ reexport:
 	sgt = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
 
 	if (IS_ERR(sgt)) {
-		dev_err(hy_drv_priv->dev, "Cannot map attachment\n");
+		dev_err(hy_drv_priv->dev, "cannot map attachment\n");
 		ret = PTR_ERR(sgt);
 		goto fail_map_attachment;
 	}
