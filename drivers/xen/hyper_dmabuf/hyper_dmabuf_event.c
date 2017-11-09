@@ -37,11 +37,12 @@
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_event.h"
 
-static void hyper_dmabuf_send_event_locked(struct hyper_dmabuf_event *e)
+static void hyper_dmabuf_send_event(struct hyper_dmabuf_event *e)
 {
 	struct hyper_dmabuf_event *oldest;
+	unsigned long irqflags;
 
-	assert_spin_locked(&hy_drv_priv->event_lock);
+	spin_lock_irqsave(&hy_drv_priv->event_lock, irqflags);
 
 	/* check current number of event then if it hits the max num allowed
 	 * then remove the oldest event in the list
@@ -60,6 +61,8 @@ static void hyper_dmabuf_send_event_locked(struct hyper_dmabuf_event *e)
 	hy_drv_priv->pending++;
 
 	wake_up_interruptible(&hy_drv_priv->event_wait);
+
+	spin_unlock_irqrestore(&hy_drv_priv->event_lock, irqflags);
 }
 
 void hyper_dmabuf_events_release(void)
@@ -89,8 +92,6 @@ int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 	struct hyper_dmabuf_event *e;
 	struct imported_sgt_info *imported;
 
-	unsigned long irqflags;
-
 	imported = hyper_dmabuf_find_imported(hid);
 
 	if (!imported) {
@@ -109,11 +110,7 @@ int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 	e->event_data.data = (void *)imported->priv;
 	e->event_data.hdr.size = imported->sz_priv;
 
-	spin_lock_irqsave(&hy_drv_priv->event_lock, irqflags);
-
-	hyper_dmabuf_send_event_locked(e);
-
-	spin_unlock_irqrestore(&hy_drv_priv->event_lock, irqflags);
+	hyper_dmabuf_send_event(e);
 
 	dev_dbg(hy_drv_priv->dev,
 		"event number = %d :", hy_drv_priv->pending);

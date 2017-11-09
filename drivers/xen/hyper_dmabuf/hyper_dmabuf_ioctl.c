@@ -441,8 +441,10 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-	if (!req)
+	if (!req) {
+		mutex_unlock(&hy_drv_priv->lock);
 		return -ENOMEM;
+	}
 
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD, &op[0]);
 
@@ -509,8 +511,10 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 
 			req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-			if (!req)
+			if (!req) {
+				mutex_unlock(&hy_drv_priv->lock);
 				return -ENOMEM;
+			}
 
 			hyper_dmabuf_create_req(req,
 						HYPER_DMABUF_EXPORT_FD_FAILED,

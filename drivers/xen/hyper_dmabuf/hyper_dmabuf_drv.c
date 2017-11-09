@@ -73,7 +73,7 @@ static void hyper_dmabuf_force_free(struct exported_sgt_info *exported,
 	}
 }
 
-int hyper_dmabuf_open(struct inode *inode, struct file *filp)
+static int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 {
 	int ret = 0;
 
@@ -84,7 +84,7 @@ int hyper_dmabuf_open(struct inode *inode, struct file *filp)
 	return ret;
 }
 
-int hyper_dmabuf_release(struct inode *inode, struct file *filp)
+static int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 {
 	hyper_dmabuf_foreach_exported(hyper_dmabuf_force_free, filp);
 
@@ -93,20 +93,18 @@ int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 
 #ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
 
-unsigned int hyper_dmabuf_event_poll(struct file *filp,
+static unsigned int hyper_dmabuf_event_poll(struct file *filp,
 				     struct poll_table_struct *wait)
 {
-	unsigned int mask = 0;
-
 	poll_wait(filp, &hy_drv_priv->event_wait, wait);
 
 	if (!list_empty(&hy_drv_priv->event_list))
-		mask |= POLLIN | POLLRDNORM;
+		return POLLIN | POLLRDNORM;
 
-	return mask;
+	return 0;
 }
 
-ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
+static ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 		size_t count, loff_t *offset)
 {
 	int ret;
@@ -115,14 +113,14 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 	if (!capable(CAP_DAC_OVERRIDE)) {
 		dev_err(hy_drv_priv->dev,
 			"Only root can read events\n");
-		return -EFAULT;
+		return -EPERM;
 	}
 
 	/* make sure user buffer can be written */
 	if (!access_ok(VERIFY_WRITE, buffer, count)) {
 		dev_err(hy_drv_priv->dev,
 			"User buffer can't be written.\n");
-		return -EFAULT;
+		return -EINVAL;
 	}
 
 	ret = mutex_lock_interruptible(&hy_drv_priv->event_read_lock);
@@ -143,6 +141,7 @@ ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
 		if (!e) {
 			if (ret)
 				break;
+
 			if (filp->f_flags & O_NONBLOCK) {
 				ret = -EAGAIN;
 				break;
@@ -233,7 +232,7 @@ static struct miscdevice hyper_dmabuf_miscdev = {
 	.fops = &hyper_dmabuf_driver_fops,
 };
 
-int register_device(void)
+static int register_device(void)
 {
 	int ret = 0;
 
@@ -252,7 +251,7 @@ int register_device(void)
 	return ret;
 }
 
-void unregister_device(void)
+static void unregister_device(void)
 {
 	dev_info(hy_drv_priv->dev,
 		"hyper_dmabuf: unregister_device() is called\n");
@@ -269,10 +268,8 @@ static int __init hyper_dmabuf_drv_init(void)
 	hy_drv_priv = kcalloc(1, sizeof(struct hyper_dmabuf_private),
 			      GFP_KERNEL);
 
-	if (!hy_drv_priv) {
-		printk(KERN_ERR "hyper_dmabuf: Failed to create drv\n");
-		return -1;
-	}
+	if (!hy_drv_priv)
+		return -ENOMEM;
 
 	ret = register_device();
 	if (ret < 0)
@@ -291,7 +288,6 @@ static int __init hyper_dmabuf_drv_init(void)
 		return -1;
 	}
 
-	/* initializing mutexes and a spinlock */
 	mutex_init(&hy_drv_priv->lock);
 
 	mutex_lock(&hy_drv_priv->lock);
@@ -301,14 +297,14 @@ static int __init hyper_dmabuf_drv_init(void)
 	dev_info(hy_drv_priv->dev,
 		 "initializing database for imported/exported dmabufs\n");
 
-	/* device structure initialization */
-	/* currently only does work-queue initialization */
 	hy_drv_priv->work_queue = create_workqueue("hyper_dmabuf_wqueue");
 
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {
 		dev_err(hy_drv_priv->dev,
 			"failed to initialize table for exported/imported entries\n");
+		mutex_unlock(&hy_drv_priv->lock);
+		kfree(hy_drv_priv);
 		return ret;
 	}
 
@@ -317,6 +313,8 @@ static int __init hyper_dmabuf_drv_init(void)
 	if (ret < 0) {
 		dev_err(hy_drv_priv->dev,
 			"failed to initialize sysfs\n");
+		mutex_unlock(&hy_drv_priv->lock);
+		kfree(hy_drv_priv);
 		return ret;
 	}
 #endif
@@ -338,7 +336,7 @@ static int __init hyper_dmabuf_drv_init(void)
 	ret = hy_drv_priv->backend_ops->init_comm_env();
 	if (ret < 0) {
 		dev_dbg(hy_drv_priv->dev,
-			"failed to initialize comm-env but it will re-attempt.\n");
+			"failed to initialize comm-env.\n");
 	} else {
 		hy_drv_priv->initialized = true;
 	}
