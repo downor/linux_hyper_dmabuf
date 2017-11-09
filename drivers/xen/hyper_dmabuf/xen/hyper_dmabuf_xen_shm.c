@@ -40,19 +40,21 @@
  * Creates 2 level page directory structure for referencing shared pages.
  * Top level page is a single page that contains up to 1024 refids that
  * point to 2nd level pages.
+ *
  * Each 2nd level page contains up to 1024 refids that point to shared
  * data pages.
+ *
  * There will always be one top level page and number of 2nd level pages
  * depends on number of shared data pages.
  *
  *      3rd level page                2nd level pages            Data pages
- * +-------------------------+   ┌>+--------------------+ ┌--->+------------+
- * |2nd level page 0 refid   |---┘ |Data page 0 refid   |-┘    |Data page 0 |
- * |2nd level page 1 refid   |---┐ |Data page 1 refid   |-┐    +------------+
+ * +-------------------------+   ┌>+--------------------+ ┌>+------------+
+ * |2nd level page 0 refid   |---┘ |Data page 0 refid   |-┘ |Data page 0 |
+ * |2nd level page 1 refid   |---┐ |Data page 1 refid   |-┐ +------------+
  * |           ...           |   | |     ....           | |
- * |2nd level page 1023 refid|-┐ | |Data page 1023 refid| └--->+------------+
- * +-------------------------+ | | +--------------------+      |Data page 1 |
- *                             | |                             +------------+
+ * |2nd level page 1023 refid|-┐ | |Data page 1023 refid| └>+------------+
+ * +-------------------------+ | | +--------------------+   |Data page 1 |
+ *                             | |                          +------------+
  *                             | └>+--------------------+
  *                             |   |Data page 1024 refid|
  *                             |   |Data page 1025 refid|
@@ -65,9 +67,8 @@
  *                                 |Data page 1047552 refid|
  *                                 |Data page 1047553 refid|
  *                                 |       ...             |
- *                                 |Data page 1048575 refid|-->+------------------+
- *                                 +-----------------------+   |Data page 1048575 |
- *                                                             +------------------+
+ *                                 |Data page 1048575 refid|
+ *                                 +-----------------------+
  *
  * Using such 2 level structure it is possible to reference up to 4GB of
  * shared data using single refid pointing to top level page.
@@ -85,7 +86,7 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	 * Calculate number of pages needed for 2nd level addresing:
 	 */
 	int n_lvl2_grefs = (nents/REFS_PER_PAGE +
-			   ((nents % REFS_PER_PAGE) ? 1: 0));
+			   ((nents % REFS_PER_PAGE) ? 1 : 0));
 
 	struct xen_shared_pages_info *sh_pages_info;
 	int i;
@@ -95,23 +96,22 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 
 	sh_pages_info = kmalloc(sizeof(*sh_pages_info), GFP_KERNEL);
 
-	if (!sh_pages_info) {
-		dev_err(hy_drv_priv->dev, "No more space left\n");
+	if (!sh_pages_info)
 		return -ENOMEM;
-	}
 
 	*refs_info = (void *)sh_pages_info;
 
 	/* share data pages in readonly mode for security */
-	for (i=0; i<nents; i++) {
+	for (i = 0; i < nents; i++) {
 		lvl2_table[i] = gnttab_grant_foreign_access(domid,
 					pfn_to_mfn(page_to_pfn(pages[i])),
-					true /* read-only from remote domain */);
+					true /* read only */);
 		if (lvl2_table[i] == -ENOSPC) {
-			dev_err(hy_drv_priv->dev, "No more space left in grant table\n");
+			dev_err(hy_drv_priv->dev,
+				"No more space left in grant table\n");
 
 			/* Unshare all already shared pages for lvl2 */
-			while(i--) {
+			while (i--) {
 				gnttab_end_foreign_access_ref(lvl2_table[i], 0);
 				gnttab_free_grant_reference(lvl2_table[i]);
 			}
@@ -120,23 +120,26 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 	}
 
 	/* Share 2nd level addressing pages in readonly mode*/
-	for (i=0; i< n_lvl2_grefs; i++) {
+	for (i = 0; i < n_lvl2_grefs; i++) {
 		lvl3_table[i] = gnttab_grant_foreign_access(domid,
-					virt_to_mfn((unsigned long)lvl2_table+i*PAGE_SIZE ),
+					virt_to_mfn(
+					(unsigned long)lvl2_table+i*PAGE_SIZE),
 					true);
 
 		if (lvl3_table[i] == -ENOSPC) {
-			dev_err(hy_drv_priv->dev, "No more space left in grant table\n");
+			dev_err(hy_drv_priv->dev,
+				"No more space left in grant table\n");
 
 			/* Unshare all already shared pages for lvl3 */
-			while(i--) {
+			while (i--) {
 				gnttab_end_foreign_access_ref(lvl3_table[i], 1);
 				gnttab_free_grant_reference(lvl3_table[i]);
 			}
 
 			/* Unshare all pages for lvl2 */
-			while(nents--) {
-				gnttab_end_foreign_access_ref(lvl2_table[nents], 0);
+			while (nents--) {
+				gnttab_end_foreign_access_ref(
+							lvl2_table[nents], 0);
 				gnttab_free_grant_reference(lvl2_table[nents]);
 			}
 
@@ -150,16 +153,17 @@ int hyper_dmabuf_xen_share_pages(struct page **pages, int domid, int nents,
 			true);
 
 	if (lvl3_gref == -ENOSPC) {
-		dev_err(hy_drv_priv->dev, "No more space left in grant table\n");
+		dev_err(hy_drv_priv->dev,
+			"No more space left in grant table\n");
 
 		/* Unshare all pages for lvl3 */
-		while(i--) {
+		while (i--) {
 			gnttab_end_foreign_access_ref(lvl3_table[i], 1);
 			gnttab_free_grant_reference(lvl3_table[i]);
 		}
 
 		/* Unshare all pages for lvl2 */
-		while(nents--) {
+		while (nents--) {
 			gnttab_end_foreign_access_ref(lvl2_table[nents], 0);
 			gnttab_free_grant_reference(lvl2_table[nents]);
 		}
@@ -187,10 +191,11 @@ err_cleanup:
 	return -ENOSPC;
 }
 
-int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
+int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents)
+{
 	struct xen_shared_pages_info *sh_pages_info;
 	int n_lvl2_grefs = (nents/REFS_PER_PAGE +
-			    ((nents % REFS_PER_PAGE) ? 1: 0));
+			    ((nents % REFS_PER_PAGE) ? 1 : 0));
 	int i;
 
 	dev_dbg(hy_drv_priv->dev, "%s entry\n", __func__);
@@ -206,28 +211,28 @@ int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
 
 	/* End foreign access for data pages, but do not free them */
 	for (i = 0; i < nents; i++) {
-		if (gnttab_query_foreign_access(sh_pages_info->lvl2_table[i])) {
+		if (gnttab_query_foreign_access(sh_pages_info->lvl2_table[i]))
 			dev_warn(hy_drv_priv->dev, "refid not shared !!\n");
-		}
+
 		gnttab_end_foreign_access_ref(sh_pages_info->lvl2_table[i], 0);
 		gnttab_free_grant_reference(sh_pages_info->lvl2_table[i]);
 	}
 
 	/* End foreign access for 2nd level addressing pages */
 	for (i = 0; i < n_lvl2_grefs; i++) {
-		if (gnttab_query_foreign_access(sh_pages_info->lvl3_table[i])) {
+		if (gnttab_query_foreign_access(sh_pages_info->lvl3_table[i]))
 			dev_warn(hy_drv_priv->dev, "refid not shared !!\n");
-		}
-		if (!gnttab_end_foreign_access_ref(sh_pages_info->lvl3_table[i], 1)) {
+
+		if (!gnttab_end_foreign_access_ref(
+					sh_pages_info->lvl3_table[i], 1))
 			dev_warn(hy_drv_priv->dev, "refid still in use!!!\n");
-		}
+
 		gnttab_free_grant_reference(sh_pages_info->lvl3_table[i]);
 	}
 
 	/* End foreign access for top level addressing page */
-	if (gnttab_query_foreign_access(sh_pages_info->lvl3_gref)) {
+	if (gnttab_query_foreign_access(sh_pages_info->lvl3_gref))
 		dev_warn(hy_drv_priv->dev, "gref not shared !!\n");
-	}
 
 	gnttab_end_foreign_access_ref(sh_pages_info->lvl3_gref, 1);
 	gnttab_free_grant_reference(sh_pages_info->lvl3_gref);
@@ -246,10 +251,11 @@ int hyper_dmabuf_xen_unshare_pages(void **refs_info, int nents) {
 	return 0;
 }
 
-/*
- * Maps provided top level ref id and then return array of pages containing data refs.
+/* Maps provided top level ref id and then return array of pages
+ * containing data refs.
  */
-struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int nents, void **refs_info)
+struct page **hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid,
+						int nents, void **refs_info)
 {
 	struct page *lvl3_table_page;
 	struct page **lvl2_table_pages;
@@ -280,19 +286,19 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 	sh_pages_info = kmalloc(sizeof(*sh_pages_info), GFP_KERNEL);
 	*refs_info = (void *) sh_pages_info;
 
-	lvl2_table_pages = kcalloc(sizeof(struct page*), n_lvl2_grefs,
+	lvl2_table_pages = kcalloc(n_lvl2_grefs, sizeof(struct page *),
 				   GFP_KERNEL);
 
-	data_pages = kcalloc(sizeof(struct page*), nents, GFP_KERNEL);
+	data_pages = kcalloc(nents, sizeof(struct page *), GFP_KERNEL);
 
-	lvl2_map_ops = kcalloc(sizeof(*lvl2_map_ops), n_lvl2_grefs,
+	lvl2_map_ops = kcalloc(n_lvl2_grefs, sizeof(*lvl2_map_ops),
 			       GFP_KERNEL);
 
-	lvl2_unmap_ops = kcalloc(sizeof(*lvl2_unmap_ops), n_lvl2_grefs,
+	lvl2_unmap_ops = kcalloc(n_lvl2_grefs, sizeof(*lvl2_unmap_ops),
 				 GFP_KERNEL);
 
-	data_map_ops = kcalloc(sizeof(*data_map_ops), nents, GFP_KERNEL);
-	data_unmap_ops = kcalloc(sizeof(*data_unmap_ops), nents, GFP_KERNEL);
+	data_map_ops = kcalloc(nents, sizeof(*data_map_ops), GFP_KERNEL);
+	data_unmap_ops = kcalloc(nents, sizeof(*data_unmap_ops), GFP_KERNEL);
 
 	/* Map top level addressing page */
 	if (gnttab_alloc_pages(1, &lvl3_table_page)) {
@@ -332,7 +338,8 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 	}
 
 	for (i = 0; i < n_lvl2_grefs; i++) {
-		lvl2_table = (grant_ref_t *)pfn_to_kaddr(page_to_pfn(lvl2_table_pages[i]));
+		lvl2_table = (grant_ref_t *)pfn_to_kaddr(
+					page_to_pfn(lvl2_table_pages[i]));
 		gnttab_set_map_op(&lvl2_map_ops[i],
 				  (unsigned long)lvl2_table, GNTMAP_host_map |
 				  GNTMAP_readonly,
@@ -348,10 +355,10 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 		dev_err(hy_drv_priv->dev,
 			"xen: cannot unmap top level page\n");
 		return NULL;
-	} else {
-		/* Mark that page was unmapped */
-		lvl3_unmap_ops.handle = -1;
 	}
+
+	/* Mark that page was unmapped */
+	lvl3_unmap_ops.handle = -1;
 
 	if (gnttab_map_refs(lvl2_map_ops, NULL,
 			    lvl2_table_pages, n_lvl2_grefs)) {
@@ -384,19 +391,22 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 		lvl2_table = pfn_to_kaddr(page_to_pfn(lvl2_table_pages[i]));
 		for (j = 0; j < REFS_PER_PAGE; j++) {
 			gnttab_set_map_op(&data_map_ops[k],
-				(unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
+				(unsigned long)pfn_to_kaddr(
+						page_to_pfn(data_pages[k])),
 				GNTMAP_host_map | GNTMAP_readonly,
 				lvl2_table[j], domid);
 
 			gnttab_set_unmap_op(&data_unmap_ops[k],
-				(unsigned long)pfn_to_kaddr(page_to_pfn(data_pages[k])),
+				(unsigned long)pfn_to_kaddr(
+						page_to_pfn(data_pages[k])),
 				GNTMAP_host_map | GNTMAP_readonly, -1);
 			k++;
 		}
 	}
 
 	/* for grefs in the last lvl2 table page */
-	lvl2_table = pfn_to_kaddr(page_to_pfn(lvl2_table_pages[n_lvl2_grefs - 1]));
+	lvl2_table = pfn_to_kaddr(page_to_pfn(
+				lvl2_table_pages[n_lvl2_grefs - 1]));
 
 	for (j = 0; j < nents_last; j++) {
 		gnttab_set_map_op(&data_map_ops[k],
@@ -424,12 +434,11 @@ struct page ** hyper_dmabuf_xen_map_shared_pages(int lvl3_gref, int domid, int n
 		dev_err(hy_drv_priv->dev,
 			"Cannot unmap 2nd level refs\n");
 		return NULL;
-	} else {
-		/* Mark that pages were unmapped */
-		for (i = 0; i < n_lvl2_grefs; i++) {
-			lvl2_unmap_ops[i].handle = -1;
-		}
 	}
+
+	/* Mark that pages were unmapped */
+	for (i = 0; i < n_lvl2_grefs; i++)
+		lvl2_unmap_ops[i].handle = -1;
 
 	for (i = 0; i < nents; i++) {
 		if (data_map_ops[i].status) {
@@ -483,7 +492,8 @@ error_cleanup_lvl3:
 	return NULL;
 }
 
-int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents) {
+int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents)
+{
 	struct xen_shared_pages_info *sh_pages_info;
 
 	dev_dbg(hy_drv_priv->dev, "%s entry\n", __func__);
@@ -498,7 +508,7 @@ int hyper_dmabuf_xen_unmap_shared_pages(void **refs_info, int nents) {
 	}
 
 	if (gnttab_unmap_refs(sh_pages_info->unmap_ops, NULL,
-			      sh_pages_info->data_pages, nents) ) {
+			      sh_pages_info->data_pages, nents)) {
 		dev_err(hy_drv_priv->dev, "Cannot unmap data pages\n");
 		return -EFAULT;
 	}

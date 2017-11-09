@@ -26,10 +26,10 @@
 #define __HYPER_DMABUF_ID_H__
 
 #define HYPER_DMABUF_ID_CREATE(domid, cnt) \
-        ((((domid) & 0xFF) << 24) | ((cnt) & 0xFFFFFF))
+	((((domid) & 0xFF) << 24) | ((cnt) & 0xFFFFFF))
 
 #define HYPER_DMABUF_DOM_ID(hid) \
-        (((hid.id) >> 24) & 0xFF)
+	(((hid.id) >> 24) & 0xFF)
 
 /* currently maximum number of buffers shared
  * at any given moment is limited to 1000

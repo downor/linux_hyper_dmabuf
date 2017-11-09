@@ -79,7 +79,9 @@ void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
 				 enum hyper_dmabuf_command command,
 				 int *operands);
 
-/* parse incoming request packet (or response) and take appropriate actions for those */
+/* parse incoming request packet (or response) and take
+ * appropriate actions for those
+ */
 int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req);
 
 #endif // __HYPER_DMABUF_MSG_H__

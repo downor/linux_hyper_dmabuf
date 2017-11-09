@@ -40,11 +40,8 @@ void store_reusable_hid(hyper_dmabuf_id_t hid)
 
 	new_reusable = kmalloc(sizeof(*new_reusable), GFP_KERNEL);
 
-	if (!new_reusable) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
+	if (!new_reusable)
 		return;
-	}
 
 	new_reusable->hid = hid;
 
@@ -54,7 +51,7 @@ void store_reusable_hid(hyper_dmabuf_id_t hid)
 static hyper_dmabuf_id_t retrieve_reusable_hid(void)
 {
 	struct list_reusable_id *reusable_head = hy_drv_priv->id_queue;
-	hyper_dmabuf_id_t hid = {-1, {0,0,0}};
+	hyper_dmabuf_id_t hid = {-1, {0, 0, 0} };
 
 	/* check there is reusable id */
 	if (!list_empty(&reusable_head->list)) {
@@ -92,7 +89,7 @@ void destroy_reusable_list(void)
 
 hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 {
-	static int count = 0;
+	static int count;
 	hyper_dmabuf_id_t hid;
 	struct list_reusable_id *reusable_head;
 
@@ -100,13 +97,11 @@ hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 	if (count == 0) {
 		reusable_head = kmalloc(sizeof(*reusable_head), GFP_KERNEL);
 
-		if (!reusable_head) {
-			dev_err(hy_drv_priv->dev,
-				"No memory left to be allocated\n");
-			return (hyper_dmabuf_id_t){-1, {0,0,0}};
-		}
+		if (!reusable_head)
+			return (hyper_dmabuf_id_t){-1, {0, 0, 0} };
 
-		reusable_head->hid.id = -1; /* list head has an invalid count */
+		/* list head has an invalid count */
+		reusable_head->hid.id = -1;
 		INIT_LIST_HEAD(&reusable_head->list);
 		hy_drv_priv->id_queue = reusable_head;
 	}
@@ -116,9 +111,8 @@ hyper_dmabuf_id_t hyper_dmabuf_get_hid(void)
 	/*creating a new H-ID only if nothing in the reusable id queue
 	 * and count is less than maximum allowed
 	 */
-	if (hid.id == -1 && count < HYPER_DMABUF_ID_MAX) {
+	if (hid.id == -1 && count < HYPER_DMABUF_ID_MAX)
 		hid.id = HYPER_DMABUF_ID_CREATE(hy_drv_priv->domid, count++);
-	}
 
 	/* random data embedded in the id for security */
 	get_random_bytes(&hid.rng_key[0], 12);
@@ -131,7 +125,7 @@ bool hyper_dmabuf_hid_keycomp(hyper_dmabuf_id_t hid1, hyper_dmabuf_id_t hid2)
 	int i;
 
 	/* compare keys */
-	for (i=0; i<3; i++) {
+	for (i = 0; i < 3; i++) {
 		if (hid1.rng_key[i] != hid2.rng_key[i])
 			return false;
 	}

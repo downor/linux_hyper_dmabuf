@@ -53,18 +53,15 @@ static int hyper_dmabuf_sync_request(hyper_dmabuf_id_t hid, int dmabuf_ops)
 
 	op[0] = hid.id;
 
-	for (i=0; i<3; i++)
+	for (i = 0; i < 3; i++)
 		op[i+1] = hid.rng_key[i];
 
 	op[4] = dmabuf_ops;
 
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
-	if (!req) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
+	if (!req)
 		return -ENOMEM;
-	}
 
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_OPS_TO_SOURCE, &op[0]);
 
@@ -81,8 +78,8 @@ static int hyper_dmabuf_sync_request(hyper_dmabuf_id_t hid, int dmabuf_ops)
 	return ret;
 }
 
-static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf,
-				   struct device* dev,
+static int hyper_dmabuf_ops_attach(struct dma_buf *dmabuf,
+				   struct device *dev,
 				   struct dma_buf_attachment *attach)
 {
 	struct imported_sgt_info *imported;
@@ -99,7 +96,7 @@ static int hyper_dmabuf_ops_attach(struct dma_buf* dmabuf,
 	return ret;
 }
 
-static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf,
+static void hyper_dmabuf_ops_detach(struct dma_buf *dmabuf,
 				    struct dma_buf_attachment *attach)
 {
 	struct imported_sgt_info *imported;
@@ -114,8 +111,9 @@ static void hyper_dmabuf_ops_detach(struct dma_buf* dmabuf,
 					HYPER_DMABUF_OPS_DETACH);
 }
 
-static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachment,
-					     enum dma_data_direction dir)
+static struct sg_table *hyper_dmabuf_ops_map(
+				struct dma_buf_attachment *attachment,
+				enum dma_data_direction dir)
 {
 	struct sg_table *st;
 	struct imported_sgt_info *imported;
@@ -130,9 +128,8 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	/* extract pages from sgt */
 	pg_info = hyper_dmabuf_ext_pgs(imported->sgt);
 
-	if (!pg_info) {
+	if (!pg_info)
 		return NULL;
-	}
 
 	/* create a new sg_table with extracted pages */
 	st = hyper_dmabuf_create_sgt(pg_info->pgs, pg_info->frst_ofst,
@@ -140,8 +137,8 @@ static struct sg_table* hyper_dmabuf_ops_map(struct dma_buf_attachment *attachme
 	if (!st)
 		goto err_free_sg;
 
-        if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir))
-                goto err_free_sg;
+	if (!dma_map_sg(attachment->dev, st->sgl, st->nents, dir))
+		goto err_free_sg;
 
 	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_MAP);
@@ -196,9 +193,8 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 
 	imported = (struct imported_sgt_info *)dma_buf->priv;
 
-	if (!dmabuf_refcount(imported->dma_buf)) {
+	if (!dmabuf_refcount(imported->dma_buf))
 		imported->dma_buf = NULL;
-	}
 
 	imported->importers--;
 
@@ -219,8 +215,9 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 					HYPER_DMABUF_OPS_RELEASE);
 
 	/*
-	 * Check if buffer is still valid and if not remove it from imported list.
-	 * That has to be done after sending sync request
+	 * Check if buffer is still valid and if not remove it
+	 * from imported list. That has to be done after sending
+	 * sync request
 	 */
 	if (finish) {
 		hyper_dmabuf_remove_imported(imported->hid);
@@ -228,7 +225,8 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 	}
 }
 
-static int hyper_dmabuf_ops_begin_cpu_access(struct dma_buf *dmabuf, enum dma_data_direction dir)
+static int hyper_dmabuf_ops_begin_cpu_access(struct dma_buf *dmabuf,
+					     enum dma_data_direction dir)
 {
 	struct imported_sgt_info *imported;
 	int ret;
@@ -244,7 +242,8 @@ static int hyper_dmabuf_ops_begin_cpu_access(struct dma_buf *dmabuf, enum dma_da
 	return ret;
 }
 
-static int hyper_dmabuf_ops_end_cpu_access(struct dma_buf *dmabuf, enum dma_data_direction dir)
+static int hyper_dmabuf_ops_end_cpu_access(struct dma_buf *dmabuf,
+					   enum dma_data_direction dir)
 {
 	struct imported_sgt_info *imported;
 	int ret;
@@ -260,7 +259,8 @@ static int hyper_dmabuf_ops_end_cpu_access(struct dma_buf *dmabuf, enum dma_data
 	return 0;
 }
 
-static void *hyper_dmabuf_ops_kmap_atomic(struct dma_buf *dmabuf, unsigned long pgnum)
+static void *hyper_dmabuf_ops_kmap_atomic(struct dma_buf *dmabuf,
+					  unsigned long pgnum)
 {
 	struct imported_sgt_info *imported;
 	int ret;
@@ -273,10 +273,12 @@ static void *hyper_dmabuf_ops_kmap_atomic(struct dma_buf *dmabuf, unsigned long 
 	ret = hyper_dmabuf_sync_request(imported->hid,
 					HYPER_DMABUF_OPS_KMAP_ATOMIC);
 
-	return NULL; /* for now NULL.. need to return the address of mapped region */
+	/* TODO: NULL for now. Need to return the addr of mapped region */
+	return NULL;
 }
 
-static void hyper_dmabuf_ops_kunmap_atomic(struct dma_buf *dmabuf, unsigned long pgnum, void *vaddr)
+static void hyper_dmabuf_ops_kunmap_atomic(struct dma_buf *dmabuf,
+					   unsigned long pgnum, void *vaddr)
 {
 	struct imported_sgt_info *imported;
 	int ret;
@@ -322,7 +324,8 @@ static void hyper_dmabuf_ops_kunmap(struct dma_buf *dmabuf, unsigned long pgnum,
 					HYPER_DMABUF_OPS_KUNMAP);
 }
 
-static int hyper_dmabuf_ops_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
+static int hyper_dmabuf_ops_mmap(struct dma_buf *dmabuf,
+				 struct vm_area_struct *vma)
 {
 	struct imported_sgt_info *imported;
 	int ret;
@@ -374,8 +377,8 @@ static const struct dma_buf_ops hyper_dmabuf_ops = {
 	.map_dma_buf = hyper_dmabuf_ops_map,
 	.unmap_dma_buf = hyper_dmabuf_ops_unmap,
 	.release = hyper_dmabuf_ops_release,
-	.begin_cpu_access = (void*)hyper_dmabuf_ops_begin_cpu_access,
-	.end_cpu_access = (void*)hyper_dmabuf_ops_end_cpu_access,
+	.begin_cpu_access = (void *)hyper_dmabuf_ops_begin_cpu_access,
+	.end_cpu_access = (void *)hyper_dmabuf_ops_end_cpu_access,
 	.map_atomic = hyper_dmabuf_ops_kmap_atomic,
 	.unmap_atomic = hyper_dmabuf_ops_kunmap_atomic,
 	.map = hyper_dmabuf_ops_kmap,
@@ -395,9 +398,8 @@ int hyper_dmabuf_export_fd(struct imported_sgt_info *imported, int flags)
 	 */
 	hyper_dmabuf_export_dma_buf(imported);
 
-	if (imported->dma_buf) {
+	if (imported->dma_buf)
 		fd = dma_buf_fd(imported->dma_buf, flags);
-	}
 
 	return fd;
 }

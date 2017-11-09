@@ -36,7 +36,7 @@ struct hyper_dmabuf_event {
 };
 
 struct hyper_dmabuf_private {
-        struct device *dev;
+	struct device *dev;
 
 	/* VM(domain) id of current VM instance */
 	int domid;
@@ -57,8 +57,8 @@ struct hyper_dmabuf_private {
 	/* flag that shows whether backend is initialized */
 	bool initialized;
 
-        wait_queue_head_t event_wait;
-        struct list_head event_list;
+	wait_queue_head_t event_wait;
+	struct list_head event_list;
 
 	spinlock_t event_lock;
 	struct mutex event_read_lock;

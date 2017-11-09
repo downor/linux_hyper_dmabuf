@@ -44,7 +44,8 @@ static void hyper_dmabuf_send_event_locked(struct hyper_dmabuf_event *e)
 	assert_spin_locked(&hy_drv_priv->event_lock);
 
 	/* check current number of event then if it hits the max num allowed
-	 * then remove the oldest event in the list */
+	 * then remove the oldest event in the list
+	 */
 	if (hy_drv_priv->pending > MAX_DEPTH_EVENT_QUEUE - 1) {
 		oldest = list_first_entry(&hy_drv_priv->event_list,
 				struct hyper_dmabuf_event, link);
@@ -61,7 +62,7 @@ static void hyper_dmabuf_send_event_locked(struct hyper_dmabuf_event *e)
 	wake_up_interruptible(&hy_drv_priv->event_wait);
 }
 
-void hyper_dmabuf_events_release()
+void hyper_dmabuf_events_release(void)
 {
 	struct hyper_dmabuf_event *e, *et;
 	unsigned long irqflags;
@@ -100,15 +101,12 @@ int hyper_dmabuf_import_event(hyper_dmabuf_id_t hid)
 
 	e = kzalloc(sizeof(*e), GFP_KERNEL);
 
-	if (!e) {
-		dev_err(hy_drv_priv->dev,
-			"no space left\n");
+	if (!e)
 		return -ENOMEM;
-	}
 
 	e->event_data.hdr.event_type = HYPER_DMABUF_NEW_IMPORT;
 	e->event_data.hdr.hid = hid;
-	e->event_data.data = (void*)imported->priv;
+	e->event_data.data = (void *)imported->priv;
 	e->event_data.hdr.size = imported->sz_priv;
 
 	spin_lock_irqsave(&hy_drv_priv->event_lock, irqflags);

@@ -41,11 +41,9 @@
 #include "hyper_dmabuf_xen_comm_list.h"
 #include "../hyper_dmabuf_drv.h"
 
-static int export_req_id = 0;
+static int export_req_id;
 
 struct hyper_dmabuf_req req_pending = {0};
-
-extern int xenstored_ready;
 
 static void xen_get_domid_delayed(struct work_struct *unused);
 static void xen_init_comm_env_delayed(struct work_struct *unused);
@@ -160,15 +158,16 @@ void xen_get_domid_delayed(struct work_struct *unused)
 	int domid, ret;
 
 	/* scheduling another if driver is still running
-	 * and xenstore has not been initialized */
+	 * and xenstore has not been initialized
+	 */
 	if (likely(xenstored_ready == 0)) {
 		dev_dbg(hy_drv_priv->dev,
-			"Xenstore is not quite ready yet. Will retry it in 500ms\n");
+			"Xenstore is not ready yet. Will retry in 500ms\n");
 		schedule_delayed_work(&get_vm_id_work, msecs_to_jiffies(500));
 	} else {
-	        xenbus_transaction_start(&xbt);
+		xenbus_transaction_start(&xbt);
 
-		ret = xenbus_scanf(xbt, "domid","", "%d", &domid);
+		ret = xenbus_scanf(xbt, "domid", "", "%d", &domid);
 
 		if (ret <= 0)
 			domid = -1;
@@ -176,14 +175,17 @@ void xen_get_domid_delayed(struct work_struct *unused)
 		xenbus_transaction_end(xbt, 0);
 
 		/* try again since -1 is an invalid id for domain
-		 * (but only if driver is still running) */
+		 * (but only if driver is still running)
+		 */
 		if (unlikely(domid == -1)) {
 			dev_dbg(hy_drv_priv->dev,
 				"domid==-1 is invalid. Will retry it in 500ms\n");
-			schedule_delayed_work(&get_vm_id_work, msecs_to_jiffies(500));
+			schedule_delayed_work(&get_vm_id_work,
+					      msecs_to_jiffies(500));
 		} else {
 			dev_info(hy_drv_priv->dev,
-				"Successfully retrieved domid from Xenstore:%d\n", domid);
+				 "Successfully retrieved domid from Xenstore:%d\n",
+				 domid);
 			hy_drv_priv->domid = domid;
 		}
 	}
@@ -199,21 +201,20 @@ int hyper_dmabuf_xen_get_domid(void)
 		return -1;
 	}
 
-        xenbus_transaction_start(&xbt);
+	xenbus_transaction_start(&xbt);
 
-        if (!xenbus_scanf(xbt, "domid","", "%d", &domid)) {
+	if (!xenbus_scanf(xbt, "domid", "", "%d", &domid))
 		domid = -1;
-        }
 
-        xenbus_transaction_end(xbt, 0);
+	xenbus_transaction_end(xbt, 0);
 
 	return domid;
 }
 
 static int xen_comm_next_req_id(void)
 {
-        export_req_id++;
-        return export_req_id;
+	export_req_id++;
+	return export_req_id;
 }
 
 /* For now cache latast rings as global variables TODO: keep them in list*/
@@ -236,19 +237,18 @@ static irqreturn_t back_ring_isr(int irq, void *info);
 static void remote_dom_exporter_watch_cb(struct xenbus_watch *watch,
 					 const char *path, const char *token)
 {
-	int rdom,ret;
+	int rdom, ret;
 	uint32_t grefid, port;
 	struct xen_comm_rx_ring_info *ring_info;
 
 	/* Check which domain has changed its exporter rings */
 	ret = sscanf(watch->node, "/local/domain/%d/", &rdom);
-	if (ret <= 0) {
+	if (ret <= 0)
 		return;
-	}
 
 	/* Check if we have importer ring for given remote domain already
-	 * created */
-
+	 * created
+	 */
 	ring_info = xen_comm_find_rx_ring(rdom);
 
 	/* Try to query remote domain exporter ring details - if
@@ -298,11 +298,8 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 
 	ring_info = kmalloc(sizeof(*ring_info), GFP_KERNEL);
 
-	if (!ring_info) {
-		dev_err(hy_drv_priv->dev,
-			"No more spae left\n");
+	if (!ring_info)
 		return -ENOMEM;
-	}
 
 	/* from exporter to importer */
 	shared_ring = (void *)__get_free_pages(GFP_KERNEL, 1);
@@ -318,8 +315,8 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	FRONT_RING_INIT(&(ring_info->ring_front), sring, PAGE_SIZE);
 
 	ring_info->gref_ring = gnttab_grant_foreign_access(domid,
-							   virt_to_mfn(shared_ring),
-							   0);
+						virt_to_mfn(shared_ring),
+						0);
 	if (ring_info->gref_ring < 0) {
 		/* fail to get gref */
 		kfree(ring_info);
@@ -340,7 +337,7 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 	/* setting up interrupt */
 	ret = bind_evtchn_to_irqhandler(alloc_unbound.port,
 					front_ring_isr, 0,
-					NULL, (void*) ring_info);
+					NULL, (void *) ring_info);
 
 	if (ret < 0) {
 		dev_err(hy_drv_priv->dev,
@@ -368,25 +365,24 @@ int hyper_dmabuf_xen_init_tx_rbuf(int domid)
 
 	ret = xen_comm_add_tx_ring(ring_info);
 
-	ret = xen_comm_expose_ring_details(hyper_dmabuf_xen_get_domid(), domid,
-					   ring_info->gref_ring, ring_info->port);
+	ret = xen_comm_expose_ring_details(hyper_dmabuf_xen_get_domid(),
+					   domid,
+					   ring_info->gref_ring,
+					   ring_info->port);
 
-	/*
-	 * Register watch for remote domain exporter ring.
+	/* Register watch for remote domain exporter ring.
 	 * When remote domain will setup its exporter ring,
 	 * we will automatically connect our importer ring to it.
 	 */
 	ring_info->watch.callback = remote_dom_exporter_watch_cb;
-	ring_info->watch.node = (const char*) kmalloc(sizeof(char) * 255, GFP_KERNEL);
+	ring_info->watch.node = kmalloc(255, GFP_KERNEL);
 
 	if (!ring_info->watch.node) {
-		dev_err(hy_drv_priv->dev,
-			"No more space left\n");
 		kfree(ring_info);
 		return -ENOMEM;
 	}
 
-	sprintf((char*)ring_info->watch.node,
+	sprintf((char *)ring_info->watch.node,
 		"/local/domain/%d/data/hyper_dmabuf/%d/port",
 		domid, hyper_dmabuf_xen_get_domid());
 
@@ -404,9 +400,8 @@ void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid)
 	/* check if we at all have exporter ring for given rdomain */
 	ring_info = xen_comm_find_tx_ring(domid);
 
-	if (!ring_info) {
+	if (!ring_info)
 		return;
-	}
 
 	xen_comm_remove_tx_ring(domid);
 
@@ -416,7 +411,7 @@ void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid)
 	/* No need to close communication channel, will be done by
 	 * this function
 	 */
-	unbind_from_irqhandler(ring_info->irq, (void*) ring_info);
+	unbind_from_irqhandler(ring_info->irq, (void *) ring_info);
 
 	/* No need to free sring page, will be freed by this function
 	 * when other side will end its access
@@ -430,7 +425,8 @@ void hyper_dmabuf_xen_cleanup_tx_rbuf(int domid)
 	if (!rx_ring_info)
 		return;
 
-	BACK_RING_INIT(&(rx_ring_info->ring_back), rx_ring_info->ring_back.sring,
+	BACK_RING_INIT(&(rx_ring_info->ring_back),
+		       rx_ring_info->ring_back.sring,
 		       PAGE_SIZE);
 }
 
@@ -473,11 +469,8 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 
 	ring_info = kmalloc(sizeof(*ring_info), GFP_KERNEL);
 
-	if (!ring_info) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
+	if (!ring_info)
 		return -ENOMEM;
-	}
 
 	ring_info->sdomain = domid;
 	ring_info->evtchn = rx_port;
@@ -485,8 +478,6 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	map_ops = kmalloc(sizeof(*map_ops), GFP_KERNEL);
 
 	if (!map_ops) {
-		dev_err(hy_drv_priv->dev,
-			"No memory left to be allocated\n");
 		ret = -ENOMEM;
 		goto fail_no_map_ops;
 	}
@@ -497,11 +488,13 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	}
 
 	gnttab_set_map_op(&map_ops[0],
-			  (unsigned long)pfn_to_kaddr(page_to_pfn(shared_ring)),
+			  (unsigned long)pfn_to_kaddr(
+					page_to_pfn(shared_ring)),
 			  GNTMAP_host_map, rx_gref, domid);
 
 	gnttab_set_unmap_op(&ring_info->unmap_op,
-			    (unsigned long)pfn_to_kaddr(page_to_pfn(shared_ring)),
+			    (unsigned long)pfn_to_kaddr(
+					page_to_pfn(shared_ring)),
 			    GNTMAP_host_map, -1);
 
 	ret = gnttab_map_refs(map_ops, NULL, &shared_ring, 1);
@@ -542,13 +535,12 @@ int hyper_dmabuf_xen_init_rx_rbuf(int domid)
 	ret = xen_comm_add_rx_ring(ring_info);
 
 	/* Setup communcation channel in opposite direction */
-	if (!xen_comm_find_tx_ring(domid)) {
+	if (!xen_comm_find_tx_ring(domid))
 		ret = hyper_dmabuf_xen_init_tx_rbuf(domid);
-	}
 
 	ret = request_irq(ring_info->irq,
 			  back_ring_isr, 0,
-			  NULL, (void*)ring_info);
+			  NULL, (void *)ring_info);
 
 	return ret;
 
@@ -577,7 +569,7 @@ void hyper_dmabuf_xen_cleanup_rx_rbuf(int domid)
 	xen_comm_remove_rx_ring(domid);
 
 	/* no need to close event channel, will be done by that function */
-	unbind_from_irqhandler(ring_info->irq, (void*)ring_info);
+	unbind_from_irqhandler(ring_info->irq, (void *)ring_info);
 
 	/* unmapping shared ring page */
 	shared_ring = virt_to_page(ring_info->ring_back.sring);
@@ -636,7 +628,8 @@ static void xen_rx_ch_add_delayed(struct work_struct *unused)
 
 				if (!ret)
 					dev_info(hy_drv_priv->dev,
-						 "Finishing up setting up rx channel for domain %d\n", i);
+						 "Done rx ch init for VM %d\n",
+						 i);
 			}
 		}
 
@@ -654,7 +647,8 @@ void xen_init_comm_env_delayed(struct work_struct *unused)
 
 	/* scheduling another work if driver is still running
 	 * and xenstore hasn't been initialized or dom_id hasn't
-	 * been correctly retrieved. */
+	 * been correctly retrieved.
+	 */
 	if (likely(xenstored_ready == 0 ||
 	    hy_drv_priv->domid == -1)) {
 		dev_dbg(hy_drv_priv->dev,
@@ -778,9 +772,8 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req,
 	ring->req_prod_pvt++;
 
 	RING_PUSH_REQUESTS_AND_CHECK_NOTIFY(ring, notify);
-	if (notify) {
+	if (notify)
 		notify_remote_via_irq(ring_info->irq);
-	}
 
 	if (wait) {
 		while (timeout--) {
@@ -792,24 +785,29 @@ int hyper_dmabuf_xen_send_req(int domid, struct hyper_dmabuf_req *req,
 
 		if (timeout < 0) {
 			mutex_unlock(&ring_info->lock);
-			dev_err(hy_drv_priv->dev, "request timed-out\n");
+			dev_err(hy_drv_priv->dev,
+				"request timed-out\n");
 			return -EBUSY;
 		}
 
 		mutex_unlock(&ring_info->lock);
 		do_gettimeofday(&tv_end);
 
-		/* checking time duration for round-trip of a request for debugging */
+		/* checking time duration for round-trip of a request
+		 * for debugging
+		 */
 		if (tv_end.tv_usec >= tv_start.tv_usec) {
 			tv_diff.tv_sec = tv_end.tv_sec-tv_start.tv_sec;
 			tv_diff.tv_usec = tv_end.tv_usec-tv_start.tv_usec;
 		} else {
 			tv_diff.tv_sec = tv_end.tv_sec-tv_start.tv_sec-1;
-			tv_diff.tv_usec = tv_end.tv_usec+1000000-tv_start.tv_usec;
+			tv_diff.tv_usec = tv_end.tv_usec+1000000-
+					  tv_start.tv_usec;
 		}
 
 		if (tv_diff.tv_sec != 0 && tv_diff.tv_usec > 16000)
-			dev_dbg(hy_drv_priv->dev, "send_req:time diff: %ld sec, %ld usec\n",
+			dev_dbg(hy_drv_priv->dev,
+				"send_req:time diff: %ld sec, %ld usec\n",
 				tv_diff.tv_sec, tv_diff.tv_usec);
 	}
 
@@ -850,23 +848,24 @@ static irqreturn_t back_ring_isr(int irq, void *info)
 			ret = hyper_dmabuf_msg_parse(ring_info->sdomain, &req);
 
 			if (ret > 0) {
-				/* preparing a response for the request and send it to
-				 * the requester
+				/* preparing a response for the request and
+				 * send it to the requester
 				 */
 				memcpy(&resp, &req, sizeof(resp));
-				memcpy(RING_GET_RESPONSE(ring, ring->rsp_prod_pvt),
+				memcpy(RING_GET_RESPONSE(ring,
+							 ring->rsp_prod_pvt),
 							 &resp, sizeof(resp));
 				ring->rsp_prod_pvt++;
 
 				dev_dbg(hy_drv_priv->dev,
-					"sending response to exporter for request id:%d\n",
+					"responding to exporter for req:%d\n",
 					resp.resp_id);
 
-				RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
+				RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring,
+								     notify);
 
-				if (notify) {
+				if (notify)
 					notify_remote_via_irq(ring_info->irq);
-				}
 			}
 
 			RING_FINAL_CHECK_FOR_REQUESTS(ring, more_to_do);
@@ -905,41 +904,40 @@ static irqreturn_t front_ring_isr(int irq, void *info)
 			dev_dbg(hy_drv_priv->dev,
 				"getting response from importer\n");
 
-			if (req_pending.req_id == resp->resp_id) {
+			if (req_pending.req_id == resp->resp_id)
 				req_pending.stat = resp->stat;
-			}
 
 			if (resp->stat == HYPER_DMABUF_REQ_NEEDS_FOLLOW_UP) {
 				/* parsing response */
 				ret = hyper_dmabuf_msg_parse(ring_info->rdomain,
-							(struct hyper_dmabuf_req *)resp);
+					(struct hyper_dmabuf_req *)resp);
 
 				if (ret < 0) {
 					dev_err(hy_drv_priv->dev,
-						"getting error while parsing response\n");
+						"err while parsing resp\n");
 				}
 			} else if (resp->stat == HYPER_DMABUF_REQ_PROCESSED) {
-				/* for debugging dma_buf remote synchronization */
+				/* for debugging dma_buf remote synch */
 				dev_dbg(hy_drv_priv->dev,
 					"original request = 0x%x\n", resp->cmd);
 				dev_dbg(hy_drv_priv->dev,
-					"Just got HYPER_DMABUF_REQ_PROCESSED\n");
+					"got HYPER_DMABUF_REQ_PROCESSED\n");
 			} else if (resp->stat == HYPER_DMABUF_REQ_ERROR) {
-				/* for debugging dma_buf remote synchronization */
+				/* for debugging dma_buf remote synch */
 				dev_dbg(hy_drv_priv->dev,
 					"original request = 0x%x\n", resp->cmd);
 				dev_dbg(hy_drv_priv->dev,
-					"Just got HYPER_DMABUF_REQ_ERROR\n");
+					"got HYPER_DMABUF_REQ_ERROR\n");
 			}
 		}
 
 		ring->rsp_cons = i;
 
-		if (i != ring->req_prod_pvt) {
+		if (i != ring->req_prod_pvt)
 			RING_FINAL_CHECK_FOR_RESPONSES(ring, more_to_do);
-		} else {
+		else
 			ring->sring->rsp_event = i+1;
-		}
+
 	} while (more_to_do);
 
 	return IRQ_HANDLED;
