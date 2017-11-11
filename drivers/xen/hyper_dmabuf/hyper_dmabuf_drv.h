@@ -48,7 +48,7 @@ struct hyper_dmabuf_private {
 	struct list_reusable_id *id_queue;
 
 	/* backend ops - hypervisor specific */
-	struct hyper_dmabuf_backend_ops *backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops;
 
 	/* device global lock */
 	/* TODO: might need a lock per resource (e.g. EXPORT LIST) */
@@ -72,7 +72,7 @@ struct list_reusable_id {
 	struct list_head list;
 };
 
-struct hyper_dmabuf_backend_ops {
+struct hyper_dmabuf_bknd_ops {
 	/* retreiving id of current virtual machine */
 	int (*get_vm_id)(void);
 

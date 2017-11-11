@@ -276,13 +276,13 @@ static int __init hyper_dmabuf_drv_init(void)
 
 /* currently only supports XEN hypervisor */
 #ifdef CONFIG_HYPER_DMABUF_XEN
-	hy_drv_priv->backend_ops = &xen_backend_ops;
+	hy_drv_priv->bknd_ops = &xen_bknd_ops;
 #else
-	hy_drv_priv->backend_ops = NULL;
+	hy_drv_priv->bknd_ops = NULL;
 	printk(KERN_ERR "hyper_dmabuf drv currently supports XEN only.\n");
 #endif
 
-	if (hy_drv_priv->backend_ops == NULL) {
+	if (hy_drv_priv->bknd_ops == NULL) {
 		printk(KERN_ERR "Hyper_dmabuf: no backend found\n");
 		return -1;
 	}
@@ -301,7 +301,7 @@ static int __init hyper_dmabuf_drv_init(void)
 	ret = hyper_dmabuf_table_init();
 	if (ret < 0) {
 		dev_err(hy_drv_priv->dev,
-			"failed to initialize table for exported/imported entries\n");
+			"fail to init table for exported/imported entries\n");
 		mutex_unlock(&hy_drv_priv->lock);
 		kfree(hy_drv_priv);
 		return ret;
@@ -330,9 +330,9 @@ static int __init hyper_dmabuf_drv_init(void)
 	hy_drv_priv->pending = 0;
 #endif
 
-	hy_drv_priv->domid = hy_drv_priv->backend_ops->get_vm_id();
+	hy_drv_priv->domid = hy_drv_priv->bknd_ops->get_vm_id();
 
-	ret = hy_drv_priv->backend_ops->init_comm_env();
+	ret = hy_drv_priv->bknd_ops->init_comm_env();
 	if (ret < 0) {
 		dev_dbg(hy_drv_priv->dev,
 			"failed to initialize comm-env.\n");
@@ -360,7 +360,7 @@ static void hyper_dmabuf_drv_exit(void)
 	/* hash tables for export/import entries and ring_infos */
 	hyper_dmabuf_table_destroy();
 
-	hy_drv_priv->backend_ops->destroy_comm();
+	hy_drv_priv->bknd_ops->destroy_comm();
 
 	/* destroy workqueue */
 	if (hy_drv_priv->work_queue)

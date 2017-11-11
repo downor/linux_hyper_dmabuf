@@ -30,7 +30,7 @@
 #include "hyper_dmabuf_xen_comm.h"
 #include "hyper_dmabuf_xen_shm.h"
 
-struct hyper_dmabuf_backend_ops xen_backend_ops = {
+struct hyper_dmabuf_bknd_ops xen_bknd_ops = {
 	.get_vm_id = xen_be_get_domid,
 	.share_pages = xen_be_share_pages,
 	.unshare_pages = xen_be_unshare_pages,
