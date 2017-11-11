@@ -473,7 +473,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 		 */
 		hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD_FAILED,
 					&op[0]);
-		bknd_ops->send_req(op[0], req, false);
+		bknd_ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req, false);
 		kfree(req);
 		dev_err(hy_drv_priv->dev,
 			"Failed to create sgt or notify exporter\n");
