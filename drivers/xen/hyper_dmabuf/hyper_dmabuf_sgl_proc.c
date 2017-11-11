@@ -170,7 +170,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct exported_sgt_info *exported,
 	struct attachment_list *attachl;
 	struct kmap_vaddr_list *va_kmapl;
 	struct vmap_vaddr_list *va_vmapl;
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 
 	if (!exported) {
 		dev_err(hy_drv_priv->dev, "invalid hyper_dmabuf_id\n");
@@ -231,7 +231,7 @@ int hyper_dmabuf_cleanup_sgt_info(struct exported_sgt_info *exported,
 	}
 
 	/* Start cleanup of buffer in reverse order to exporting */
-	ops->unshare_pages(&exported->refs_info, exported->nents);
+	bknd_ops->unshare_pages(&exported->refs_info, exported->nents);
 
 	/* unmap dma-buf */
 	dma_buf_unmap_attachment(exported->active_attached->attach,

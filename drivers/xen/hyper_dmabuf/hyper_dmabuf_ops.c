@@ -52,7 +52,7 @@ static int dmabuf_refcount(struct dma_buf *dma_buf)
 static int sync_request(hyper_dmabuf_id_t hid, int dmabuf_ops)
 {
 	struct hyper_dmabuf_req *req;
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 	int op[5];
 	int i;
 	int ret;
@@ -72,7 +72,8 @@ static int sync_request(hyper_dmabuf_id_t hid, int dmabuf_ops)
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_OPS_TO_SOURCE, &op[0]);
 
 	/* send request and wait for a response */
-	ret = ops->send_req(HYPER_DMABUF_DOM_ID(hid), req, WAIT_AFTER_SYNC_REQ);
+	ret = bknd_ops->send_req(HYPER_DMABUF_DOM_ID(hid), req,
+				 WAIT_AFTER_SYNC_REQ);
 
 	if (ret < 0) {
 		dev_dbg(hy_drv_priv->dev,
@@ -186,7 +187,7 @@ static void hyper_dmabuf_ops_unmap(struct dma_buf_attachment *attachment,
 static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 {
 	struct imported_sgt_info *imported;
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 	int ret;
 	int finish;
 
@@ -201,7 +202,8 @@ static void hyper_dmabuf_ops_release(struct dma_buf *dma_buf)
 	imported->importers--;
 
 	if (imported->importers == 0) {
-		ops->unmap_shared_pages(&imported->refs_info, imported->nents);
+		bknd_ops->unmap_shared_pages(&imported->refs_info,
+					     imported->nents);
 
 		if (imported->sgt) {
 			sg_free_table(imported->sgt);

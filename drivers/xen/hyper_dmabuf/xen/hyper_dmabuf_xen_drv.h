@@ -26,7 +26,7 @@
 #define __HYPER_DMABUF_XEN_DRV_H__
 #include <xen/interface/grant_table.h>
 
-extern struct hyper_dmabuf_backend_ops xen_backend_ops;
+extern struct hyper_dmabuf_bknd_ops xen_bknd_ops;
 
 /* Main purpose of this structure is to keep
  * all references created or acquired for sharing

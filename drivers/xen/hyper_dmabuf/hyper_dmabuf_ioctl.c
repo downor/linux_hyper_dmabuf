@@ -44,7 +44,7 @@
 static int hyper_dmabuf_tx_ch_setup_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_tx_ch_setup *tx_ch_attr;
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 	int ret = 0;
 
 	if (!data) {
@@ -53,7 +53,7 @@ static int hyper_dmabuf_tx_ch_setup_ioctl(struct file *filp, void *data)
 	}
 	tx_ch_attr = (struct ioctl_hyper_dmabuf_tx_ch_setup *)data;
 
-	ret = ops->init_tx_ch(tx_ch_attr->remote_domain);
+	ret = bknd_ops->init_tx_ch(tx_ch_attr->remote_domain);
 
 	return ret;
 }
@@ -61,7 +61,7 @@ static int hyper_dmabuf_tx_ch_setup_ioctl(struct file *filp, void *data)
 static int hyper_dmabuf_rx_ch_setup_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_rx_ch_setup *rx_ch_attr;
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 	int ret = 0;
 
 	if (!data) {
@@ -71,7 +71,7 @@ static int hyper_dmabuf_rx_ch_setup_ioctl(struct file *filp, void *data)
 
 	rx_ch_attr = (struct ioctl_hyper_dmabuf_rx_ch_setup *)data;
 
-	ret = ops->init_rx_ch(rx_ch_attr->source_domain);
+	ret = bknd_ops->init_rx_ch(rx_ch_attr->source_domain);
 
 	return ret;
 }
@@ -79,7 +79,7 @@ static int hyper_dmabuf_rx_ch_setup_ioctl(struct file *filp, void *data)
 static int send_export_msg(struct exported_sgt_info *exported,
 			   struct pages_info *pg_info)
 {
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 	struct hyper_dmabuf_req *req;
 	int op[MAX_NUMBER_OF_OPERANDS] = {0};
 	int ret, i;
@@ -94,7 +94,7 @@ static int send_export_msg(struct exported_sgt_info *exported,
 		op[4] = pg_info->nents;
 		op[5] = pg_info->frst_ofst;
 		op[6] = pg_info->last_len;
-		op[7] = ops->share_pages(pg_info->pgs, exported->rdomid,
+		op[7] = bknd_ops->share_pages(pg_info->pgs, exported->rdomid,
 					 pg_info->nents, &exported->refs_info);
 		if (op[7] < 0) {
 			dev_err(hy_drv_priv->dev, "pages sharing failed\n");
@@ -115,7 +115,7 @@ static int send_export_msg(struct exported_sgt_info *exported,
 	/* composing a message to the importer */
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT, &op[0]);
 
-	ret = ops->send_req(exported->rdomid, req, true);
+	ret = bknd_ops->send_req(exported->rdomid, req, true);
 
 	kfree(req);
 
@@ -423,7 +423,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 {
 	struct ioctl_hyper_dmabuf_export_fd *export_fd_attr =
 			(struct ioctl_hyper_dmabuf_export_fd *)data;
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 	struct imported_sgt_info *imported;
 	struct hyper_dmabuf_req *req;
 	struct page **data_pgs;
@@ -465,7 +465,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 
 	hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD, &op[0]);
 
-	ret = ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req, true);
+	ret = bknd_ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req, true);
 
 	if (ret < 0) {
 		/* in case of timeout other end eventually will receive request,
@@ -473,7 +473,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 		 */
 		hyper_dmabuf_create_req(req, HYPER_DMABUF_EXPORT_FD_FAILED,
 					&op[0]);
-		ops->send_req(op[0], req, false);
+		bknd_ops->send_req(op[0], req, false);
 		kfree(req);
 		dev_err(hy_drv_priv->dev,
 			"Failed to create sgt or notify exporter\n");
@@ -512,7 +512,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 			imported->hid.id, imported->hid.rng_key[0],
 			imported->hid.rng_key[1], imported->hid.rng_key[2]);
 
-		data_pgs = ops->map_shared_pages(imported->ref_handle,
+		data_pgs = bknd_ops->map_shared_pages(imported->ref_handle,
 					HYPER_DMABUF_DOM_ID(imported->hid),
 					imported->nents,
 					&imported->refs_info);
@@ -536,7 +536,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 			hyper_dmabuf_create_req(req,
 						HYPER_DMABUF_EXPORT_FD_FAILED,
 						&op[0]);
-			ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req,
+			bknd_ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid), req,
 							  false);
 			kfree(req);
 			mutex_unlock(&hy_drv_priv->lock);
@@ -570,7 +570,7 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 static void delayed_unexport(struct work_struct *work)
 {
 	struct hyper_dmabuf_req *req;
-	struct hyper_dmabuf_backend_ops *ops = hy_drv_priv->backend_ops;
+	struct hyper_dmabuf_bknd_ops *bknd_ops = hy_drv_priv->bknd_ops;
 	struct exported_sgt_info *exported =
 		container_of(work, struct exported_sgt_info, unexport.work);
 	int op[4];
@@ -602,7 +602,7 @@ static void delayed_unexport(struct work_struct *work)
 	/* Now send unexport request to remote domain, marking
 	 * that buffer should not be used anymore
 	 */
-	ret = ops->send_req(exported->rdomid, req, true);
+	ret = bknd_ops->send_req(exported->rdomid, req, true);
 	if (ret < 0) {
 		dev_err(hy_drv_priv->dev,
 			"unexport message for buffer {id:%d key:%d %d %d} failed\n",
