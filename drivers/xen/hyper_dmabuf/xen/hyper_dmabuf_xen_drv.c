@@ -31,6 +31,8 @@
 #include "hyper_dmabuf_xen_shm.h"
 
 struct hyper_dmabuf_bknd_ops xen_bknd_ops = {
+	.init = NULL, /* not needed for xen */
+	.cleanup = NULL, /* not needed for xen */
 	.get_vm_id = xen_be_get_domid,
 	.share_pages = xen_be_share_pages,
 	.unshare_pages = xen_be_unshare_pages,

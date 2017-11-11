@@ -330,6 +330,16 @@ static int __init hyper_dmabuf_drv_init(void)
 	hy_drv_priv->pending = 0;
 #endif
 
+	if (hy_drv_priv->bknd_ops->init) {
+		ret = hy_drv_priv->bknd_ops->init();
+
+		if (ret < 0) {
+			dev_dbg(hy_drv_priv->dev,
+				"failed to initialize backend.\n");
+			return ret;
+		}
+	}
+
 	hy_drv_priv->domid = hy_drv_priv->bknd_ops->get_vm_id();
 
 	ret = hy_drv_priv->bknd_ops->init_comm_env();
@@ -361,6 +371,10 @@ static void hyper_dmabuf_drv_exit(void)
 	hyper_dmabuf_table_destroy();
 
 	hy_drv_priv->bknd_ops->destroy_comm();
+
+	if (hy_drv_priv->bknd_ops->cleanup) {
+		hy_drv_priv->bknd_ops->cleanup();
+	};
 
 	/* destroy workqueue */
 	if (hy_drv_priv->work_queue)

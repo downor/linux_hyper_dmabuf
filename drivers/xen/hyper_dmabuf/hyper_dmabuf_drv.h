@@ -73,6 +73,12 @@ struct list_reusable_id {
 };
 
 struct hyper_dmabuf_bknd_ops {
+	/* backend initialization routine (optional) */
+	int (*init)(void);
+
+	/* backend cleanup routine (optional) */
+	int (*cleanup)(void);
+
 	/* retreiving id of current virtual machine */
 	int (*get_vm_id)(void);
 
