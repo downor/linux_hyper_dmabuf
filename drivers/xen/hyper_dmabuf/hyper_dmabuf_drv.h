@@ -91,7 +91,7 @@ struct hyper_dmabuf_bknd_ops {
 	/* map remotely shared pages on importer's side via
 	 * hypervisor-specific method
 	 */
-	struct page ** (*map_shared_pages)(int, int, int, void **);
+	struct page ** (*map_shared_pages)(unsigned long, int, int, void **);
 
 	/* unmap and free shared pages on importer's side via
 	 * hypervisor-specific method

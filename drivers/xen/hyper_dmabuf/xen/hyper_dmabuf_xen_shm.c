@@ -252,8 +252,8 @@ int xen_be_unshare_pages(void **refs_info, int nents)
 /* Maps provided top level ref id and then return array of pages
  * containing data refs.
  */
-struct page **xen_be_map_shared_pages(int lvl3_gref, int domid,
-				   int nents, void **refs_info)
+struct page **xen_be_map_shared_pages(unsigned long lvl3_gref, int domid,
+				      int nents, void **refs_info)
 {
 	struct page *lvl3_table_page;
 	struct page **lvl2_table_pages;
