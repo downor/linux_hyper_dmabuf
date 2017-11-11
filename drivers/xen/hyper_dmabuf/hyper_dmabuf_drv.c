@@ -227,7 +227,7 @@ static const struct file_operations hyper_dmabuf_driver_fops = {
 
 static struct miscdevice hyper_dmabuf_miscdev = {
 	.minor = MISC_DYNAMIC_MINOR,
-	.name = "xen/hyper_dmabuf",
+	.name = "hyper_dmabuf",
 	.fops = &hyper_dmabuf_driver_fops,
 };
 
