@@ -271,8 +271,10 @@ static int __init hyper_dmabuf_drv_init(void)
 		return -ENOMEM;
 
 	ret = register_device();
-	if (ret < 0)
+	if (ret < 0) {
+		kfree(hy_drv_priv);
 		return ret;
+	}
 
 /* currently only supports XEN hypervisor */
 #ifdef CONFIG_HYPER_DMABUF_XEN
@@ -284,6 +286,7 @@ static int __init hyper_dmabuf_drv_init(void)
 
 	if (hy_drv_priv->bknd_ops == NULL) {
 		printk(KERN_ERR "Hyper_dmabuf: no backend found\n");
+		kfree(hy_drv_priv);
 		return -1;
 	}
 
@@ -336,6 +339,8 @@ static int __init hyper_dmabuf_drv_init(void)
 		if (ret < 0) {
 			dev_dbg(hy_drv_priv->dev,
 				"failed to initialize backend.\n");
+			mutex_unlock(&hy_drv_priv->lock);
+			kfree(hy_drv_priv);
 			return ret;
 		}
 	}
