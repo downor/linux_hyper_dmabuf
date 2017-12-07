@@ -42,7 +42,7 @@
 #include "hyper_dmabuf_event.h"
 
 #ifdef CONFIG_HYPER_DMABUF_XEN
-#include "xen/hyper_dmabuf_xen_drv.h"
+#include "xen-backend/hyper_dmabuf_xen_drv.h"
 #endif
 
 MODULE_LICENSE("GPL and additional rights");

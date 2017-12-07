@@ -321,6 +321,6 @@ config XEN_SYMS
 config XEN_HAVE_VPMU
        bool
 
-source "drivers/xen/hyper_dmabuf/Kconfig"
+source "drivers/dma-buf/hyper_dmabuf/Kconfig"
 
 endmenu

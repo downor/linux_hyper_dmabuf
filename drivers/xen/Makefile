@@ -4,7 +4,7 @@ obj-$(CONFIG_X86)			+= fallback.o
 obj-y	+= grant-table.o features.o balloon.o manage.o preempt.o time.o
 obj-y	+= events/
 obj-y	+= xenbus/
-obj-y	+= hyper_dmabuf/
+obj-y	+= ../dma-buf/hyper_dmabuf/
 
 nostackp := $(call cc-option, -fno-stack-protector)
 CFLAGS_features.o			:= $(nostackp)

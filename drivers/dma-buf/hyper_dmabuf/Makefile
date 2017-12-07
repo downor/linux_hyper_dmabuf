@@ -19,10 +19,10 @@ ifeq ($(CONFIG_HYPER_DMABUF_EVENT_GEN), y)
 endif
 
 ifeq ($(CONFIG_HYPER_DMABUF_XEN), y)
-	$(TARGET_MODULE)-objs += xen/hyper_dmabuf_xen_comm.o \
-				 xen/hyper_dmabuf_xen_comm_list.o \
-				 xen/hyper_dmabuf_xen_shm.o \
-				 xen/hyper_dmabuf_xen_drv.o
+	$(TARGET_MODULE)-objs += xen-backend/hyper_dmabuf_xen_comm.o \
+				 xen-backend/hyper_dmabuf_xen_comm_list.o \
+				 xen-backend/hyper_dmabuf_xen_shm.o \
+				 xen-backend/hyper_dmabuf_xen_drv.o
 endif
 
 obj-$(CONFIG_HYPER_DMABUF) := $(TARGET_MODULE).o
