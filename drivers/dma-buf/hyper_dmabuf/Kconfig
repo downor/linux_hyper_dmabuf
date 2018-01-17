@@ -1,0 +1,23 @@
+menu "HYPER_DMABUF"
+
+config HYPER_DMABUF
+	tristate "Enables hyper dmabuf driver"
+	default y
+	help
+	  This option enables Hyper_DMABUF driver.
+
+	  This driver works as abstraction layer that export and import
+	  DMA_BUF from/to another virtual OS running on the same HW platform
+	  powered by a hypervisor
+
+config HYPER_DMABUF_SYSFS
+	bool "Enable sysfs information about hyper DMA buffers"
+	default y
+	depends on HYPER_DMABUF
+	help
+	  Expose run-time information about currently imported and exported buffers
+	  registered in EXPORT and IMPORT list in Hyper_DMABUF driver.
+
+	  The location of sysfs is under "...."
+
+endmenu
