@@ -20,4 +20,11 @@ config HYPER_DMABUF_SYSFS
 
 	  The location of sysfs is under "...."
 
+config HYPER_DMABUF_XEN
+        bool "Configure hyper_dmabuf for XEN hypervisor"
+        default y
+        depends on HYPER_DMABUF && XEN && XENFS
+        help
+          Enabling Hyper_DMABUF Backend for XEN hypervisor
+
 endmenu

@@ -10,6 +10,13 @@ ifneq ($(KERNELRELEASE),)
 				 hyper_dmabuf_msg.o \
 				 hyper_dmabuf_id.o \
 
+ifeq ($(CONFIG_HYPER_DMABUF_XEN), y)
+	$(TARGET_MODULE)-objs += backends/xen/hyper_dmabuf_xen_comm.o \
+				 backends/xen/hyper_dmabuf_xen_comm_list.o \
+				 backends/xen/hyper_dmabuf_xen_shm.o \
+				 backends/xen/hyper_dmabuf_xen_drv.o
+endif
+
 obj-$(CONFIG_HYPER_DMABUF) := $(TARGET_MODULE).o
 
 # If we are running without kernel build system

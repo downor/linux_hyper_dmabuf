@@ -42,6 +42,10 @@
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
 
+#ifdef CONFIG_HYPER_DMABUF_XEN
+#include "backends/xen/hyper_dmabuf_xen_drv.h"
+#endif
+
 MODULE_LICENSE("GPL and additional rights");
 MODULE_AUTHOR("Intel Corporation");
 
@@ -145,7 +149,13 @@ static int __init hyper_dmabuf_drv_init(void)
 		return ret;
 	}
 
+/* currently only supports XEN hypervisor */
+#ifdef CONFIG_HYPER_DMABUF_XEN
+	hy_drv_priv->bknd_ops = &xen_bknd_ops;
+#else
 	hy_drv_priv->bknd_ops = NULL;
+	pr_err("hyper_dmabuf drv currently supports XEN only.\n");
+#endif
 
 	if (hy_drv_priv->bknd_ops == NULL) {
 		pr_err("Hyper_dmabuf: no backend found\n");
