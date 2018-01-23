@@ -9,6 +9,7 @@ ifneq ($(KERNELRELEASE),)
 				 hyper_dmabuf_ops.o \
 				 hyper_dmabuf_msg.o \
 				 hyper_dmabuf_id.o \
+				 hyper_dmabuf_remote_sync.o \
 
 ifeq ($(CONFIG_HYPER_DMABUF_XEN), y)
 	$(TARGET_MODULE)-objs += backends/xen/hyper_dmabuf_xen_comm.o \

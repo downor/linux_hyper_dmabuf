@@ -34,6 +34,7 @@
 #include <linux/workqueue.h>
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_msg.h"
+#include "hyper_dmabuf_remote_sync.h"
 #include "hyper_dmabuf_list.h"
 
 struct cmd_process {
@@ -89,6 +90,25 @@ void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
 		 */
 
 		for (i = 0; i < 4; i++)
+			req->op[i] = op[i];
+		break;
+
+	case HYPER_DMABUF_OPS_TO_REMOTE:
+		/* notifying dmabuf map/unmap to importer (probably not needed)
+		 * for dmabuf synchronization
+		 */
+		break;
+
+	case HYPER_DMABUF_OPS_TO_SOURCE:
+		/* notifying dmabuf map/unmap to exporter, map will make
+		 * the driver to do shadow mapping or unmapping for
+		 * synchronization with original exporter (e.g. i915)
+		 *
+		 * command : DMABUF_OPS_TO_SOURCE.
+		 * op0~3 : hyper_dmabuf_id
+		 * op4 : map(=1)/unmap(=2)/attach(=3)/detach(=4)
+		 */
+		for (i = 0; i < 5; i++)
 			req->op[i] = op[i];
 		break;
 
@@ -201,6 +221,12 @@ static void cmd_process_work(struct work_struct *work)
 
 		break;
 
+	case HYPER_DMABUF_OPS_TO_REMOTE:
+		/* notifying dmabuf map/unmap to importer
+		 * (probably not needed) for dmabuf synchronization
+		 */
+		break;
+
 	default:
 		/* shouldn't get here */
 		break;
@@ -217,6 +243,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	struct imported_sgt_info *imported;
 	struct exported_sgt_info *exported;
 	hyper_dmabuf_id_t hid;
+	int ret;
 
 	if (!req) {
 		dev_err(hy_drv_priv->dev, "request is NULL\n");
@@ -229,7 +256,7 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 	hid.rng_key[2] = req->op[3];
 
 	if ((req->cmd < HYPER_DMABUF_EXPORT) ||
-		(req->cmd > HYPER_DMABUF_NOTIFY_UNEXPORT)) {
+		(req->cmd > HYPER_DMABUF_OPS_TO_SOURCE)) {
 		dev_err(hy_drv_priv->dev, "invalid command\n");
 		return -EINVAL;
 	}
@@ -267,6 +294,30 @@ int hyper_dmabuf_msg_parse(int domid, struct hyper_dmabuf_req *req)
 		} else {
 			req->stat = HYPER_DMABUF_REQ_ERROR;
 		}
+
+		return req->cmd;
+	}
+
+	/* dma buf remote synchronization */
+	if (req->cmd == HYPER_DMABUF_OPS_TO_SOURCE) {
+		/* notifying dmabuf map/unmap to exporter, map will
+		 * make the driver to do shadow mapping
+		 * or unmapping for synchronization with original
+		 * exporter (e.g. i915)
+		 *
+		 * command : DMABUF_OPS_TO_SOURCE.
+		 * op0~3 : hyper_dmabuf_id
+		 * op1 : enum hyper_dmabuf_ops {....}
+		 */
+		dev_dbg(hy_drv_priv->dev,
+			"%s: HYPER_DMABUF_OPS_TO_SOURCE\n", __func__);
+
+		ret = hyper_dmabuf_remote_sync(hid, req->op[4]);
+
+		if (ret)
+			req->stat = HYPER_DMABUF_REQ_ERROR;
+		else
+			req->stat = HYPER_DMABUF_REQ_PROCESSED;
 
 		return req->cmd;
 	}
