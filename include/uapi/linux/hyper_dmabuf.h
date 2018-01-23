@@ -88,4 +88,36 @@ struct ioctl_hyper_dmabuf_unexport {
 	int status;
 };
 
+#define IOCTL_HYPER_DMABUF_QUERY \
+_IOC(_IOC_NONE, 'G', 5, sizeof(struct ioctl_hyper_dmabuf_query))
+struct ioctl_hyper_dmabuf_query {
+	/* in parameters */
+	/* hyper dmabuf id to be queried */
+	hyper_dmabuf_id_t hid;
+	/* item to be queried */
+	int item;
+	/* OUT parameters */
+	/* Value of queried item */
+	unsigned long info;
+};
+
+/* DMABUF query */
+
+enum hyper_dmabuf_query {
+	HYPER_DMABUF_QUERY_TYPE = 0x10,
+	HYPER_DMABUF_QUERY_EXPORTER,
+	HYPER_DMABUF_QUERY_IMPORTER,
+	HYPER_DMABUF_QUERY_SIZE,
+	HYPER_DMABUF_QUERY_BUSY,
+	HYPER_DMABUF_QUERY_UNEXPORTED,
+	HYPER_DMABUF_QUERY_DELAYED_UNEXPORTED,
+	HYPER_DMABUF_QUERY_PRIV_INFO_SIZE,
+	HYPER_DMABUF_QUERY_PRIV_INFO,
+};
+
+enum hyper_dmabuf_status {
+	EXPORTED = 0x01,
+	IMPORTED,
+};
+
 #endif //__LINUX_PUBLIC_HYPER_DMABUF_H__

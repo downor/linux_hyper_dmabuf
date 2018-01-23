@@ -41,6 +41,7 @@
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_sgl_proc.h"
 #include "hyper_dmabuf_ops.h"
+#include "hyper_dmabuf_query.h"
 
 static int hyper_dmabuf_tx_ch_setup_ioctl(struct file *filp, void *data)
 {
@@ -543,7 +544,6 @@ static int hyper_dmabuf_export_fd_ioctl(struct file *filp, void *data)
 			hyper_dmabuf_create_req(req,
 						HYPER_DMABUF_EXPORT_FD_FAILED,
 						&op[0]);
-
 			bknd_ops->send_req(HYPER_DMABUF_DOM_ID(imported->hid),
 					   req, false);
 			kfree(req);
@@ -682,6 +682,51 @@ int hyper_dmabuf_unexport_ioctl(struct file *filp, void *data)
 	return 0;
 }
 
+static int hyper_dmabuf_query_ioctl(struct file *filp, void *data)
+{
+	struct ioctl_hyper_dmabuf_query *query_attr =
+			(struct ioctl_hyper_dmabuf_query *)data;
+	struct exported_sgt_info *exported = NULL;
+	struct imported_sgt_info *imported = NULL;
+	int ret = 0;
+
+	if (HYPER_DMABUF_DOM_ID(query_attr->hid) == hy_drv_priv->domid) {
+		/* query for exported dmabuf */
+		exported = hyper_dmabuf_find_exported(query_attr->hid);
+		if (exported) {
+			ret = hyper_dmabuf_query_exported(exported,
+							  query_attr->item,
+							  &query_attr->info);
+		} else {
+			dev_err(hy_drv_priv->dev,
+				"hid {id:%d key:%d %d %d} not in exp list\n",
+				query_attr->hid.id,
+				query_attr->hid.rng_key[0],
+				query_attr->hid.rng_key[1],
+				query_attr->hid.rng_key[2]);
+			return -ENOENT;
+		}
+	} else {
+		/* query for imported dmabuf */
+		imported = hyper_dmabuf_find_imported(query_attr->hid);
+		if (imported) {
+			ret = hyper_dmabuf_query_imported(imported,
+							  query_attr->item,
+							  &query_attr->info);
+		} else {
+			dev_err(hy_drv_priv->dev,
+				"hid {id:%d key:%d %d %d} not in imp list\n",
+				query_attr->hid.id,
+				query_attr->hid.rng_key[0],
+				query_attr->hid.rng_key[1],
+				query_attr->hid.rng_key[2]);
+			return -ENOENT;
+		}
+	}
+
+	return ret;
+}
+
 const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_TX_CH_SETUP,
 			       hyper_dmabuf_tx_ch_setup_ioctl, 0),
@@ -693,6 +738,8 @@ const struct hyper_dmabuf_ioctl_desc hyper_dmabuf_ioctls[] = {
 			       hyper_dmabuf_export_fd_ioctl, 0),
 	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_UNEXPORT,
 			       hyper_dmabuf_unexport_ioctl, 0),
+	HYPER_DMABUF_IOCTL_DEF(IOCTL_HYPER_DMABUF_QUERY,
+			       hyper_dmabuf_query_ioctl, 0),
 };
 
 long hyper_dmabuf_ioctl(struct file *filp,

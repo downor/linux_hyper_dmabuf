@@ -21,6 +21,7 @@
  * IN THE SOFTWARE.
  *
  * SPDX-License-Identifier: (MIT OR GPL-2.0)
+ *
  */
 
 #ifndef __LINUX_PUBLIC_HYPER_DMABUF_DRV_H__
