@@ -60,9 +60,12 @@ void hyper_dmabuf_create_req(struct hyper_dmabuf_req *req,
 		 * op5 : offset of data in the first page
 		 * op6 : length of data in the last page
 		 * op7 : top-level reference number for shared pages
+		 * op8 : size of private data (from op9)
+		 * op9 ~ : Driver-specific private data
+		 *	   (e.g. graphic buffer's meta info)
 		 */
 
-		memcpy(&req->op[0], &op[0], 8 * sizeof(int) + op[8]);
+		memcpy(&req->op[0], &op[0], 9 * sizeof(int) + op[8]);
 		break;
 
 	case HYPER_DMABUF_NOTIFY_UNEXPORT:
@@ -116,6 +119,9 @@ static void cmd_process_work(struct work_struct *work)
 		 * op5 : offset of data in the first page
 		 * op6 : length of data in the last page
 		 * op7 : top-level reference number for shared pages
+		 * op8 : size of private data (from op9)
+		 * op9 ~ : Driver-specific private data
+		 *         (e.g. graphic buffer's meta info)
 		 */
 
 		/* if nents == 0, it means it is a message only for
@@ -135,6 +141,24 @@ static void cmd_process_work(struct work_struct *work)
 				break;
 			}
 
+			/* if size of new private data is different,
+			 * we reallocate it.
+			 */
+			if (imported->sz_priv != req->op[8]) {
+				kfree(imported->priv);
+				imported->sz_priv = req->op[8];
+				imported->priv = kcalloc(1, req->op[8],
+							 GFP_KERNEL);
+				if (!imported->priv) {
+					/* set it invalid */
+					imported->valid = 0;
+					break;
+				}
+			}
+
+			/* updating priv data */
+			memcpy(imported->priv, &req->op[9], req->op[8]);
+
 			break;
 		}
 
@@ -142,6 +166,14 @@ static void cmd_process_work(struct work_struct *work)
 
 		if (!imported)
 			break;
+
+		imported->sz_priv = req->op[8];
+		imported->priv = kcalloc(1, req->op[8], GFP_KERNEL);
+
+		if (!imported->priv) {
+			kfree(imported);
+			break;
+		}
 
 		imported->hid.id = req->op[0];
 
@@ -161,6 +193,8 @@ static void cmd_process_work(struct work_struct *work)
 		dev_dbg(hy_drv_priv->dev, "\tfirst offset %d\n", req->op[5]);
 		dev_dbg(hy_drv_priv->dev, "\tlast len %d\n", req->op[6]);
 		dev_dbg(hy_drv_priv->dev, "\tgrefid %d\n", req->op[7]);
+
+		memcpy(imported->priv, &req->op[9], req->op[8]);
 
 		imported->valid = true;
 		hyper_dmabuf_register_imported(imported);
