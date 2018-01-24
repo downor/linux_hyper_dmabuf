@@ -35,6 +35,7 @@
 #include "hyper_dmabuf_drv.h"
 #include "hyper_dmabuf_msg.h"
 #include "hyper_dmabuf_remote_sync.h"
+#include "hyper_dmabuf_event.h"
 #include "hyper_dmabuf_list.h"
 
 struct cmd_process {
@@ -179,6 +180,11 @@ static void cmd_process_work(struct work_struct *work)
 			/* updating priv data */
 			memcpy(imported->priv, &req->op[9], req->op[8]);
 
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+			/* generating import event */
+			hyper_dmabuf_import_event(imported->hid);
+#endif
+
 			break;
 		}
 
@@ -218,6 +224,11 @@ static void cmd_process_work(struct work_struct *work)
 
 		imported->valid = true;
 		hyper_dmabuf_register_imported(imported);
+
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+		/* generating import event */
+		hyper_dmabuf_import_event(imported->hid);
+#endif
 
 		break;
 
