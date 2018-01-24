@@ -25,6 +25,8 @@
 #ifndef __LINUX_PUBLIC_HYPER_DMABUF_H__
 #define __LINUX_PUBLIC_HYPER_DMABUF_H__
 
+#define MAX_SIZE_PRIV_DATA 192
+
 typedef struct {
 	int id;
 	int rng_key[3]; /* 12bytes long random number */
@@ -56,6 +58,8 @@ struct ioctl_hyper_dmabuf_export_remote {
 	int remote_domain;
 	/* exported dma buf id */
 	hyper_dmabuf_id_t hid;
+	int sz_priv;
+	char *priv;
 };
 
 #define IOCTL_HYPER_DMABUF_EXPORT_FD \

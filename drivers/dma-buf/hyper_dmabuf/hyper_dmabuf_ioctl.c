@@ -103,6 +103,11 @@ static int send_export_msg(struct exported_sgt_info *exported,
 		}
 	}
 
+	op[8] = exported->sz_priv;
+
+	/* driver/application specific private info */
+	memcpy(&op[9], exported->priv, op[8]);
+
 	req = kcalloc(1, sizeof(*req), GFP_KERNEL);
 
 	if (!req)
@@ -120,8 +125,9 @@ static int send_export_msg(struct exported_sgt_info *exported,
 
 /* Fast path exporting routine in case same buffer is already exported.
  *
- * If same buffer is still valid and exist in EXPORT LIST it returns 0 so
- * that remaining normal export process can be skipped.
+ * If same buffer is still valid and exist in EXPORT LIST, it only updates
+ * user-private data for the buffer and returns 0 so that that it can skip
+ * normal export process.
  *
  * If "unexport" is scheduled for the buffer, it cancels it since the buffer
  * is being re-exported.
@@ -129,7 +135,7 @@ static int send_export_msg(struct exported_sgt_info *exported,
  * return '1' if reexport is needed, return '0' if succeeds, return
  * Kernel error code if something goes wrong
  */
-static int fastpath_export(hyper_dmabuf_id_t hid)
+static int fastpath_export(hyper_dmabuf_id_t hid, int sz_priv, char *priv)
 {
 	int reexport = 1;
 	int ret = 0;
@@ -153,6 +159,46 @@ static int fastpath_export(hyper_dmabuf_id_t hid)
 			return reexport;
 
 		exported->unexport_sched = false;
+	}
+
+	/* if there's any change in size of private data.
+	 * we reallocate space for private data with new size
+	 */
+	if (sz_priv != exported->sz_priv) {
+		kfree(exported->priv);
+
+		/* truncating size */
+		if (sz_priv > MAX_SIZE_PRIV_DATA)
+			exported->sz_priv = MAX_SIZE_PRIV_DATA;
+		else
+			exported->sz_priv = sz_priv;
+
+		exported->priv = kcalloc(1, exported->sz_priv,
+					 GFP_KERNEL);
+
+		if (!exported->priv) {
+			hyper_dmabuf_remove_exported(exported->hid);
+			hyper_dmabuf_cleanup_sgt_info(exported, true);
+			kfree(exported);
+			return -ENOMEM;
+		}
+	}
+
+	/* update private data in sgt_info with new ones */
+	ret = copy_from_user(exported->priv, priv, exported->sz_priv);
+	if (ret) {
+		dev_err(hy_drv_priv->dev,
+			"Failed to load a new private data\n");
+		ret = -EINVAL;
+	} else {
+		/* send an export msg for updating priv in importer */
+		ret = send_export_msg(exported, NULL);
+
+		if (ret < 0) {
+			dev_err(hy_drv_priv->dev,
+				"Failed to send a new private data\n");
+			ret = -EBUSY;
+		}
 	}
 
 	return ret;
@@ -191,7 +237,8 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 					     export_remote_attr->remote_domain);
 
 	if (hid.id != -1) {
-		ret = fastpath_export(hid);
+		ret = fastpath_export(hid, export_remote_attr->sz_priv,
+				      export_remote_attr->priv);
 
 		/* return if fastpath_export succeeds or
 		 * gets some fatal error
@@ -223,6 +270,24 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 	if (!exported) {
 		ret = -ENOMEM;
 		goto fail_sgt_info_creation;
+	}
+
+	/* possible truncation */
+	if (export_remote_attr->sz_priv > MAX_SIZE_PRIV_DATA)
+		exported->sz_priv = MAX_SIZE_PRIV_DATA;
+	else
+		exported->sz_priv = export_remote_attr->sz_priv;
+
+	/* creating buffer for private data of buffer */
+	if (exported->sz_priv != 0) {
+		exported->priv = kcalloc(1, exported->sz_priv, GFP_KERNEL);
+
+		if (!exported->priv) {
+			ret = -ENOMEM;
+			goto fail_priv_creation;
+		}
+	} else {
+		dev_err(hy_drv_priv->dev, "size is 0\n");
 	}
 
 	exported->hid = hyper_dmabuf_get_hid();
@@ -278,6 +343,10 @@ static int hyper_dmabuf_export_remote_ioctl(struct file *filp, void *data)
 	INIT_LIST_HEAD(&exported->active_attached->list);
 	INIT_LIST_HEAD(&exported->va_kmapped->list);
 	INIT_LIST_HEAD(&exported->va_vmapped->list);
+
+	/* copy private data to sgt_info */
+	ret = copy_from_user(exported->priv, export_remote_attr->priv,
+			     exported->sz_priv);
 
 	if (ret) {
 		dev_err(hy_drv_priv->dev,
@@ -337,6 +406,9 @@ fail_map_va_kmapped:
 
 fail_map_active_attached:
 	kfree(exported->active_sgts);
+	kfree(exported->priv);
+
+fail_priv_creation:
 	kfree(exported);
 
 fail_map_active_sgts:
@@ -566,6 +638,9 @@ static void delayed_unexport(struct work_struct *work)
 
 		/* register hyper_dmabuf_id to the list for reuse */
 		hyper_dmabuf_store_hid(exported->hid);
+
+		if (exported->sz_priv > 0 && !exported->priv)
+			kfree(exported->priv);
 
 		kfree(exported);
 	}

@@ -101,6 +101,12 @@ struct exported_sgt_info {
 	 * the buffer can be completely freed.
 	 */
 	struct file *filp;
+
+	/* size of private */
+	size_t sz_priv;
+
+	/* private data associated with the exported buffer */
+	char *priv;
 };
 
 /* imported_sgt_info contains information about imported DMA_BUF
@@ -126,6 +132,12 @@ struct imported_sgt_info {
 	void *refs_info;
 	bool valid;
 	int importers;
+
+	/* size of private */
+	size_t sz_priv;
+
+	/* private data associated with the exported buffer */
+	char *priv;
 };
 
 #endif /* __HYPER_DMABUF_STRUCT_H__ */
