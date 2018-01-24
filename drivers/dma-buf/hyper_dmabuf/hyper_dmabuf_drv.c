@@ -41,6 +41,7 @@
 #include "hyper_dmabuf_ioctl.h"
 #include "hyper_dmabuf_list.h"
 #include "hyper_dmabuf_id.h"
+#include "hyper_dmabuf_event.h"
 
 #ifdef CONFIG_HYPER_DMABUF_XEN
 #include "backends/xen/hyper_dmabuf_xen_drv.h"
@@ -91,10 +92,138 @@ static int hyper_dmabuf_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+
+static unsigned int hyper_dmabuf_event_poll(struct file *filp,
+				     struct poll_table_struct *wait)
+{
+	poll_wait(filp, &hy_drv_priv->event_wait, wait);
+
+	if (!list_empty(&hy_drv_priv->event_list))
+		return POLLIN | POLLRDNORM;
+
+	return 0;
+}
+
+static ssize_t hyper_dmabuf_event_read(struct file *filp, char __user *buffer,
+		size_t count, loff_t *offset)
+{
+	int ret;
+
+	/* only root can read events */
+	if (!capable(CAP_DAC_OVERRIDE)) {
+		dev_err(hy_drv_priv->dev,
+			"Only root can read events\n");
+		return -EPERM;
+	}
+
+	/* make sure user buffer can be written */
+	if (!access_ok(VERIFY_WRITE, buffer, count)) {
+		dev_err(hy_drv_priv->dev,
+			"User buffer can't be written.\n");
+		return -EINVAL;
+	}
+
+	ret = mutex_lock_interruptible(&hy_drv_priv->event_read_lock);
+	if (ret)
+		return ret;
+
+	while (1) {
+		struct hyper_dmabuf_event *e = NULL;
+
+		spin_lock_irq(&hy_drv_priv->event_lock);
+		if (!list_empty(&hy_drv_priv->event_list)) {
+			e = list_first_entry(&hy_drv_priv->event_list,
+					struct hyper_dmabuf_event, link);
+			list_del(&e->link);
+		}
+		spin_unlock_irq(&hy_drv_priv->event_lock);
+
+		if (!e) {
+			if (ret)
+				break;
+
+			if (filp->f_flags & O_NONBLOCK) {
+				ret = -EAGAIN;
+				break;
+			}
+
+			mutex_unlock(&hy_drv_priv->event_read_lock);
+			ret = wait_event_interruptible(hy_drv_priv->event_wait,
+				  !list_empty(&hy_drv_priv->event_list));
+
+			if (ret == 0)
+				ret = mutex_lock_interruptible(
+					&hy_drv_priv->event_read_lock);
+
+			if (ret)
+				return ret;
+		} else {
+			unsigned int length = (sizeof(e->event_data.hdr) +
+						      e->event_data.hdr.size);
+
+			if (length > count - ret) {
+put_back_event:
+				spin_lock_irq(&hy_drv_priv->event_lock);
+				list_add(&e->link, &hy_drv_priv->event_list);
+				spin_unlock_irq(&hy_drv_priv->event_lock);
+				break;
+			}
+
+			if (copy_to_user(buffer + ret, &e->event_data.hdr,
+					 sizeof(e->event_data.hdr))) {
+				if (ret == 0)
+					ret = -EFAULT;
+
+				goto put_back_event;
+			}
+
+			ret += sizeof(e->event_data.hdr);
+
+			if (copy_to_user(buffer + ret, e->event_data.data,
+					 e->event_data.hdr.size)) {
+				/* error while copying void *data */
+
+				struct hyper_dmabuf_event_hdr dummy_hdr = {0};
+
+				ret -= sizeof(e->event_data.hdr);
+
+				/* nullifying hdr of the event in user buffer */
+				if (copy_to_user(buffer + ret, &dummy_hdr,
+						 sizeof(dummy_hdr))) {
+					dev_err(hy_drv_priv->dev,
+						"failed to nullify invalid hdr already in userspace\n");
+				}
+
+				ret = -EFAULT;
+
+				goto put_back_event;
+			}
+
+			ret += e->event_data.hdr.size;
+			hy_drv_priv->pending--;
+			kfree(e);
+		}
+	}
+
+	mutex_unlock(&hy_drv_priv->event_read_lock);
+
+	return ret;
+}
+
+#endif
+
 static const struct file_operations hyper_dmabuf_driver_fops = {
 	.owner = THIS_MODULE,
 	.open = hyper_dmabuf_open,
 	.release = hyper_dmabuf_release,
+
+/* poll and read interfaces are needed only for event-polling */
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+	.read = hyper_dmabuf_event_read,
+	.poll = hyper_dmabuf_event_poll,
+#endif
+
 	.unlocked_ioctl = hyper_dmabuf_ioctl,
 };
 
@@ -194,6 +323,18 @@ static int __init hyper_dmabuf_drv_init(void)
 	}
 #endif
 
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+	mutex_init(&hy_drv_priv->event_read_lock);
+	spin_lock_init(&hy_drv_priv->event_lock);
+
+	/* Initialize event queue */
+	INIT_LIST_HEAD(&hy_drv_priv->event_list);
+	init_waitqueue_head(&hy_drv_priv->event_wait);
+
+	/* resetting number of pending events */
+	hy_drv_priv->pending = 0;
+#endif
+
 	if (hy_drv_priv->bknd_ops->init) {
 		ret = hy_drv_priv->bknd_ops->init();
 
@@ -249,6 +390,11 @@ static void hyper_dmabuf_drv_exit(void)
 	/* destroy id_queue */
 	if (hy_drv_priv->id_queue)
 		hyper_dmabuf_free_hid_list();
+
+#ifdef CONFIG_HYPER_DMABUF_EVENT_GEN
+	/* clean up event queue */
+	hyper_dmabuf_events_release();
+#endif
 
 	mutex_unlock(&hy_drv_priv->lock);
 
