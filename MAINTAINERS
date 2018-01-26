@@ -6468,6 +6468,17 @@ S:	Maintained
 F:	mm/memory-failure.c
 F:	mm/hwpoison-inject.c
 
+Hyper_DMABUF DRIVER
+M:	Dongwon Kim <dongwon.kim@intel.com>
+M:	Mateusz Polrola <mateuszx.potrola@intel.com>
+L:	linux-kernel@vger.kernel.org
+L:	xen-devel@lists.xenproject.org
+S:	Maintained
+F:	drivers/dma-buf/hyper_dmabuf*
+F:	include/uapi/linux/hyper_dmabuf.h
+F:	Documentation/hyper-dmabuf-sharing.txt
+T:	https://github.com/downor/linux_hyper_dmabuf/
+
 Hyper-V CORE AND DRIVERS
 M:	"K. Y. Srinivasan" <kys@microsoft.com>
 M:	Haiyang Zhang <haiyangz@microsoft.com>
