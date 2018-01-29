@@ -332,11 +332,14 @@ int xen_be_init_tx_rbuf(int domid)
 	}
 
 	/* setting up interrupt */
-	ret = bind_evtchn_to_irqhandler(alloc_unbound.port,
-					front_ring_isr, 0,
-					NULL, (void *) ring_info);
+	ring_info->irq = bind_evtchn_to_irq(alloc_unbound.port);
 
-	if (ret < 0) {
+	ret = request_threaded_irq(ring_info->irq,
+				   NULL,
+				   front_ring_isr,
+				   IRQF_ONESHOT, NULL, ring_info);
+
+	if (ret != 0) {
 		dev_err(hy_drv_priv->dev,
 			"Failed to setup event channel\n");
 		close.port = alloc_unbound.port;
@@ -348,7 +351,6 @@ int xen_be_init_tx_rbuf(int domid)
 	}
 
 	ring_info->rdomain = domid;
-	ring_info->irq = ret;
 	ring_info->port = alloc_unbound.port;
 
 	mutex_init(&ring_info->lock);
@@ -535,9 +537,10 @@ int xen_be_init_rx_rbuf(int domid)
 	if (!xen_comm_find_tx_ring(domid))
 		ret = xen_be_init_tx_rbuf(domid);
 
-	ret = request_irq(ring_info->irq,
-			  back_ring_isr, 0,
-			  NULL, (void *)ring_info);
+	ret = request_threaded_irq(ring_info->irq,
+				   NULL,
+				   back_ring_isr, IRQF_ONESHOT,
+				   NULL, (void *)ring_info);
 
 	return ret;
 
